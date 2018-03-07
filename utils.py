@@ -30,6 +30,6 @@ def parse(path=None):
 if __name__ == '__main__':
     path = 'data/train.txt'
     for v in parse(path):
-        if 'shop_score_description' in v:
+        if 'score' in v:
             print(v)
     print(len(parse(path)))
