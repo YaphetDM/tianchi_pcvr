@@ -2,6 +2,8 @@
 import time
 from codecs import open
 from datetime import datetime
+import numpy as np
+import random
 
 
 def add_dict(feat_value, _dict=None):
@@ -84,13 +86,29 @@ def parse(path=None):
                         # shop_review_positive_rate,shop_score_service,shop_score_delivery,shop_score_description
                         elif i in [21, 23, 24, 25]:
                             scores.append(float(split[i]))
+                scores.append(float(split[-1]))
                 feature_each.extend(scores)
                 feature_all.append(feature_each)
+    featmap = dict(zip(feature_cnt.keys(), range(len(feature_cnt))))
+    sample_len = len(feature_all)
+    train_idx = int(sample_len * 0.7)
+    valuate_idx = int(sample_len * 0.9)
+    random.shuffle(feature_all)
+    sample = [each[-5:] + [featmap.get(v, -1) for v in each[:-5]] for each in feature_all]
+    train_data = sample[:train_idx]
+    valuate_data = sample[train_idx:valuate_idx]
+    test_data = sample[valuate_idx:]
 
-    return feature_cnt, feature_all, label
+    return train_data, valuate_data, test_data, featmap
+    # return feature_cnt, feature_all
 
 
 if __name__ == '__main__':
+
     path = 'data/train.txt'
-    for v in parse(path)[0]:
-        print(v)
+    train_data, valuate_data, test_data, featmap = parse(path)
+    for i in featmap:
+        print(i, featmap[i])
+    print(train_data[0])
+    print(valuate_data[0])
+    print(test_data[0])
