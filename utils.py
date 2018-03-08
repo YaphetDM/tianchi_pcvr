@@ -3,7 +3,39 @@ import time
 from codecs import open
 from datetime import datetime
 import numpy as np
-import random
+
+
+class DataSet(object):
+    def __init__(self, features, labels):
+        self._features = features
+        self._labels = labels
+        self._index_in_epoch = 0
+        self._epochs_completed = 0
+        self._num_examples = features.shape[0]
+
+    def features(self):
+        return self._features
+
+    def labels(self):
+        return self._labels
+
+    def epochs_completed(self):
+        return self._epochs_completed
+
+    def next_batch(self, batch_size=64):
+        start = self._index_in_epoch
+        self._index_in_epoch += batch_size
+        if self._index_in_epoch > self._num_examples:
+            self._epochs_completed += 1
+            perm = np.arange(self._num_examples)
+            np.random.shuffle(perm)
+            self._features = self._features[perm]
+            self._labels = self._labels[perm]
+            start = 0
+            self._index_in_epoch = batch_size
+            assert batch_size <= self._num_examples
+        end = self._index_in_epoch
+        return self._features[start:end], self._labels[start:end]
 
 
 def add_dict(feat_value, _dict=None):
@@ -33,19 +65,21 @@ def get_predict_category_property(_str=None):
     return res
 
 
-def parse(path=None):
+# def yield_train_data()
+
+def parse(path=None, df=5):
     _len = 0
     feature = None
     feature_cnt = {}
     feature_all = []
-    label = []
+    labels = []
     with open(path, encoding='utf8') as content:
         for line in content.readlines():
             if line.startswith('instance'):
                 feature = line.strip().split(' ')
                 _len = len(feature)
             else:
-                label.append(float(line.strip().split(' ')[-1]))
+                labels.append(float(line.strip().split(' ')[-1]))
                 feature_each = []
                 scores = []
                 split = line.strip().split(' ')
@@ -86,29 +120,33 @@ def parse(path=None):
                         # shop_review_positive_rate,shop_score_service,shop_score_delivery,shop_score_description
                         elif i in [21, 23, 24, 25]:
                             scores.append(float(split[i]))
-                scores.append(float(split[-1]))
                 feature_each.extend(scores)
                 feature_all.append(feature_each)
-    featmap = dict(zip(feature_cnt.keys(), range(len(feature_cnt))))
+    filter_cnt = {key: feature_cnt[key] for key in feature_cnt.keys() if feature_cnt[key] >= df}
+    featmap = dict(zip(sorted(filter_cnt.keys()), range(len(filter_cnt))))
     sample_len = len(feature_all)
+    # 7 2 1
     train_idx = int(sample_len * 0.7)
     valuate_idx = int(sample_len * 0.9)
-    random.shuffle(feature_all)
-    sample = [each[-5:] + [featmap.get(v, -1) for v in each[:-5]] for each in feature_all]
-    train_data = sample[:train_idx]
-    valuate_data = sample[train_idx:valuate_idx]
-    test_data = sample[valuate_idx:]
+    sample = np.array([each[-4:] + [featmap.get(v, -1) for v in each[:-4]] for each in feature_all])
+    train_features = sample[:train_idx]
+    train_labels = labels[:train_idx]
+    valuate_features = sample[train_idx:valuate_idx]
+    valuate_labels = labels[train_idx:valuate_idx]
+    test_features = sample[valuate_idx:]
+    test_labels = labels[valuate_idx:]
+    train = DataSet(train_features, train_labels)
+    valuate = DataSet(valuate_features, valuate_labels)
+    test = DataSet(test_features, test_labels)
 
-    return train_data, valuate_data, test_data, featmap
+    return train, valuate, test, featmap
     # return feature_cnt, feature_all
 
 
 if __name__ == '__main__':
-
     path = 'data/train.txt'
-    train_data, valuate_data, test_data, featmap = parse(path)
+    train, valuate, test, featmap = parse(path)
     for i in featmap:
         print(i, featmap[i])
-    print(train_data[0])
-    print(valuate_data[0])
-    print(test_data[0])
+    a = np.array([1, 2, 3])
+    print()
