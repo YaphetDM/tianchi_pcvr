@@ -48,7 +48,7 @@ def parse(path=None):
                 scores = []
                 split = line.strip().split(' ')
                 for i in range(1, _len - 1):
-                    ## item_category_list -> 2, item_property_list -> 3
+                    # item_category_list -> 2, item_property_list -> 3
                     if i == 2 or i == 3:
                         feat = feature[i].replace('_list', '')
                         value = split[i]
@@ -81,7 +81,7 @@ def parse(path=None):
                             feature_value = feature[i] + '_' + value
                             feature_each.append(feature_value)
                             add_dict(feature_value, feature_cnt)
-                        # predict_category_property
+                        # shop_review_positive_rate,shop_score_service,shop_score_delivery,shop_score_description
                         elif i in [21, 23, 24, 25]:
                             scores.append(float(split[i]))
                 feature_each.extend(scores)
@@ -92,6 +92,5 @@ def parse(path=None):
 
 if __name__ == '__main__':
     path = 'data/train.txt'
-    for v in parse(path)[1][0]:
+    for v in parse(path)[0]:
         print(v)
-        print(datetime(1537862577))
