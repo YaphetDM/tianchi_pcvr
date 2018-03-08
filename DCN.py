@@ -7,6 +7,7 @@ def tf_weighted_sigmoid_ce_with_logits(labels=None, logits=None, sample_weight=N
     return tf.multiply(tf.nn.sigmoid_cross_entropy_with_logits(
         labels=labels, logits=logits), sample_weight)
 
+
 class DeepCrossNetwork(object):
     def __init__(self, filed_dim, feature_dim, embedding_size=64, cross_layer_num=1,
                  hidden_size=None, use_batch_norm=True, deep_l2_reg=0.0, sample_weight=0.5,
