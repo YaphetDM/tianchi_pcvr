@@ -35,7 +35,7 @@ class DataSet(object):
             self._index_in_epoch = batch_size
             assert batch_size <= self._num_examples
         end = self._index_in_epoch
-        return self._features[start:end], self._labels[start:end]
+        return self._features[start:end].tolist(), self._labels[start:end].tolist()
 
 
 def add_dict(feat_value, _dict=None):
@@ -67,7 +67,7 @@ def get_predict_category_property(_str=None):
 
 # def yield_train_data()
 
-def parse(path=None, df=5):
+def input_data(path=None, df=5):
     _len = 0
     feature = None
     feature_cnt = {}
@@ -123,18 +123,28 @@ def parse(path=None, df=5):
                 feature_each.extend(scores)
                 feature_all.append(feature_each)
     filter_cnt = {key: feature_cnt[key] for key in feature_cnt.keys() if feature_cnt[key] >= df}
+
     featmap = dict(zip(sorted(filter_cnt.keys()), range(len(filter_cnt))))
-    sample_len = len(feature_all)
+    sample = np.array([each[-4:] + [featmap.get(v, -1) for v in each[:-4] if featmap.get(v, -1) >= 0]
+                       for each in feature_all])
+    sample_len = len(sample)
+    perm = np.arange(sample_len)
+    np.random.shuffle(perm)
+    sample = sample[perm]
+
     # 7 2 1
     train_idx = int(sample_len * 0.7)
     valuate_idx = int(sample_len * 0.9)
-    sample = np.array([each[-4:] + [featmap.get(v, -1) for v in each[:-4]] for each in feature_all])
+
     train_features = sample[:train_idx]
     train_labels = labels[:train_idx]
+
     valuate_features = sample[train_idx:valuate_idx]
     valuate_labels = labels[train_idx:valuate_idx]
+
     test_features = sample[valuate_idx:]
     test_labels = labels[valuate_idx:]
+
     train = DataSet(train_features, train_labels)
     valuate = DataSet(valuate_features, valuate_labels)
     test = DataSet(test_features, test_labels)
@@ -145,8 +155,8 @@ def parse(path=None, df=5):
 
 if __name__ == '__main__':
     path = 'data/train.txt'
-    train, valuate, test, featmap = parse(path)
+    train, valuate, test, featmap = input_data(path)
     for i in featmap:
         print(i, featmap[i])
-    a = np.array([1, 2, 3])
-    print()
+    for each in train.features()[0:5]:
+        print(len(each))
