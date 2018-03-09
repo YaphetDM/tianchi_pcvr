@@ -131,6 +131,7 @@ def input_data(path=None, df=5):
     perm = np.arange(sample_len)
     np.random.shuffle(perm)
     sample = sample[perm]
+    labels = labels[perm]
 
     # 7 2 1
     train_idx = int(sample_len * 0.7)
