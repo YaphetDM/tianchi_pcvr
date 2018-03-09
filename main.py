@@ -2,6 +2,7 @@
 from utils import input_data
 import xgboost as xgb
 
+
 if __name__ == '__main__':
     path = 'data/train.txt'
     train, valuate, test, featmap = input_data(path)
