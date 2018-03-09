@@ -127,19 +127,23 @@ def input_data(path=None, df=5):
     filter_cnt = {key: feature_cnt[key] for key in feature_cnt.keys() if feature_cnt[key] >= df}
 
     featmap = dict(zip(sorted(filter_cnt.keys()), range(len(filter_cnt))))
-    sample = np.array([[each[-4:],
-                        [featmap.get(v, -1) for v in each[:-4] if 'item_category' in v and featmap.get(v, -1) >= 0],
-                        [featmap.get(v, -1) for v in each[:-4] if 'item_property' in v and featmap.get(v, -1) >= 0],
-                        [featmap.get(v, -1) for v in each[:-4] if featmap.get(v, -1) >= 0 and
-                         'item_category' not in each and 'item_property' not in each]]
-                       for each in feature_all])
-    # sample = np.array([each[-4:] + [featmap.get(v, -1) for v in each[:-4] if featmap.get(v, -1) >= 0]
+    # sample = np.array([[each[-4:],
+    #                     [featmap.get(v, -1) for v in each[:-4] if 'item_category' in v and featmap.get(v, -1) >= 0],
+    #                     [featmap.get(v, -1) for v in each[:-4] if 'item_property' in v and featmap.get(v, -1) >= 0],
+    #                     [featmap.get(v, -1) for v in each[:-4] if featmap.get(v, -1) >= 0 and
+    #                      'item_category' not in each and 'item_property' not in each]]
     #                    for each in feature_all])
+    sample = np.array(
+        [[each[-4:], [featmap.get(v, -1) for v in each[:-4] if 'item_category' in v and featmap.get(v, -1) >= 0],
+          [featmap.get(v, -1) for v in each[:-4] if 'item_property' in v and featmap.get(v, -1) >= 0],
+          [featmap.get(v, -1) for v in each[:-4]
+           if 'item_category' not in v and 'item_property' not in v]]
+         for each in feature_all])
     sample_len = len(sample)
     perm = np.arange(sample_len)
     np.random.shuffle(perm)
-    sample = sample[perm]
-    labels = np.array(labels)[perm]
+    # sample = sample[perm]
+    # labels = np.array(labels)[perm]
 
     # 7 2 1
     train_idx = int(sample_len * 0.7)
@@ -174,6 +178,8 @@ def _embedding(w, indices, mode='mean'):
         return tf.reduce_sum(tf.multiply(param_tensor, embedding), axis=0)
     return None
 
+
+# def
 
 if __name__ == '__main__':
     path = 'data/train.txt'
