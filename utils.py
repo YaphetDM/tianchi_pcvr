@@ -3,6 +3,7 @@ import time
 from codecs import open
 from datetime import datetime
 import numpy as np
+import tensorflow as tf
 
 
 class DataSet(object):
@@ -119,14 +120,21 @@ def input_data(path=None, df=5):
                             add_dict(feature_value, feature_cnt)
                         # shop_review_positive_rate,shop_score_service,shop_score_delivery,shop_score_description
                         elif i in [21, 23, 24, 25]:
+                            # feature_each.append(float(split[i]))
                             scores.append(float(split[i]))
                 feature_each.extend(scores)
                 feature_all.append(feature_each)
     filter_cnt = {key: feature_cnt[key] for key in feature_cnt.keys() if feature_cnt[key] >= df}
 
     featmap = dict(zip(sorted(filter_cnt.keys()), range(len(filter_cnt))))
-    sample = np.array([each[-4:] + [featmap.get(v, -1) for v in each[:-4] if featmap.get(v, -1) >= 0]
+    sample = np.array([[each[-4:],
+                        [featmap.get(v, -1) for v in each[:-4] if 'item_category' in v and featmap.get(v, -1) >= 0],
+                        [featmap.get(v, -1) for v in each[:-4] if 'item_property' in v and featmap.get(v, -1) >= 0],
+                        [featmap.get(v, -1) for v in each[:-4] if featmap.get(v, -1) >= 0 and
+                         'item_category' not in each and 'item_property' not in each]]
                        for each in feature_all])
+    # sample = np.array([each[-4:] + [featmap.get(v, -1) for v in each[:-4] if featmap.get(v, -1) >= 0]
+    #                    for each in feature_all])
     sample_len = len(sample)
     perm = np.arange(sample_len)
     np.random.shuffle(perm)
@@ -154,10 +162,26 @@ def input_data(path=None, df=5):
     # return feature_cnt, feature_all
 
 
+def _embedding(w, indices, mode='mean'):
+    if mode == 'mean':
+        embedding = tf.nn.embedding_lookup(w, indices)
+        return tf.reduce_mean(embedding, axis=0)
+    elif mode == 'softmax':
+        embedding = tf.nn.embedding_lookup(w, indices)
+        params = np.array([np.exp(-i) for i in range(len(indices))], dtype=np.float32)
+        params = params / np.sum(params)
+        print(params)
+        param_tensor = tf.reshape(params, (len(indices), -1))
+        # return tf.cross(param_tensor,embedding)
+        return tf.reduce_sum(tf.multiply(param_tensor, embedding), axis=0)
+    else:
+        return None
+
+
 if __name__ == '__main__':
     path = 'data/train.txt'
     train, valuate, test, featmap = input_data(path)
     for i in featmap:
         print(i, featmap[i])
-    for each in train.features()[0:5]:
-        print(len(each))
+    for each in train.features()[0]:
+        print(each)
