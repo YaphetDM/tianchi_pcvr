@@ -2,6 +2,7 @@
 import tensorflow as tf
 from tensorflow.contrib.layers import fully_connected, l2_regularizer
 
+
 def tf_weighted_sigmoid_ce_with_logits(labels=None, logits=None, sample_weight=None):
     return tf.multiply(tf.nn.sigmoid_cross_entropy_with_logits(
         labels=labels, logits=logits), sample_weight)
