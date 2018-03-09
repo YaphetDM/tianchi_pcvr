@@ -170,12 +170,9 @@ def _embedding(w, indices, mode='mean'):
         embedding = tf.nn.embedding_lookup(w, indices)
         params = np.array([np.exp(-i) for i in range(len(indices))], dtype=np.float32)
         params = params / np.sum(params)
-        print(params)
         param_tensor = tf.reshape(params, (len(indices), -1))
-        # return tf.cross(param_tensor,embedding)
         return tf.reduce_sum(tf.multiply(param_tensor, embedding), axis=0)
-    else:
-        return None
+    return None
 
 
 if __name__ == '__main__':
