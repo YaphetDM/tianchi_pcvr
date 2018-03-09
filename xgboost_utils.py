@@ -1,9 +1,9 @@
 # coding:utf-8
+
 import time
 from codecs import open
 from datetime import datetime
 import numpy as np
-import tensorflow as tf
 
 
 class DataSet(object):
@@ -132,10 +132,7 @@ def input_data(path=None, df=5):
 
     featmap = dict(zip(sorted(filter_cnt.keys()), range(len(filter_cnt))))
     sample = np.array(
-        [[each[-4:], [featmap.get(v, -1) for v in each[:-4] if 'item_category' in v and featmap.get(v, -1) >= 0],
-          [featmap.get(v, -1) for v in each[:-4] if 'item_property' in v and featmap.get(v, -1) >= 0],
-          [featmap.get(v, -1) for v in each[:-4]
-           if 'item_category' not in v and 'item_property' not in v]]
+        [each[-4:]+[featmap.get(v, -1) for v in each[:-4] if featmap.get(v, -1) >= 0]
          for each in feature_all])
     sample_len = len(sample)
     perm = np.arange(sample_len)
@@ -161,28 +158,12 @@ def input_data(path=None, df=5):
     test = DataSet(test_features, test_labels)
 
     return train, valuate, test, featmap
-    # return feature_cnt, feature_all
 
-
-def _embedding(w, indices, mode='mean'):
-    if mode == 'mean':
-        embedding = tf.nn.embedding_lookup(w, indices)
-        return tf.reduce_mean(embedding, axis=0)
-    elif mode == 'softmax':
-        embedding = tf.nn.embedding_lookup(w, indices)
-        params = np.array([np.exp(-i) for i in range(len(indices))], dtype=np.float32)
-        params = params / np.sum(params)
-        param_tensor = tf.reshape(params, (len(indices), -1))
-        return tf.reduce_sum(tf.multiply(param_tensor, embedding), axis=0)
-    return None
-
-
-# def
 
 if __name__ == '__main__':
     path = 'data/train.txt'
     train, valuate, test, featmap = input_data(path)
     for i in featmap:
         print(i, featmap[i])
-    for each in train.features()[0]:
+    for each in train.features():
         print(each)
