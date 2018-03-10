@@ -4,6 +4,7 @@ import time
 from codecs import open
 from datetime import datetime
 import numpy as np
+import pandas as pd
 
 
 class DataSet(object):
@@ -46,12 +47,13 @@ def add_dict(feat_value, _dict=None):
         _dict[feat_value] += 1
 
 
-def get_week_day(value, _format='%Y-%m-%d-%H'):
+def get_week_day(value, day_format='%Y-%m-%d', time_format='%Y-%m-%d-%H'):
     value = time.localtime(value)
-    format_time = time.strftime(_format, value)
+    format_day = time.strftime(day_format, value)
+    format_time = time.strftime(time_format, value)
     year, month, day, hour = format_time.split('-')
     dt = datetime(year=int(year), month=int(month), day=int(day))
-    return dt.weekday(), hour
+    return format_day, dt.weekday(), hour
 
 
 def get_predict_category_property(_str=None):
@@ -96,7 +98,7 @@ def input_data(path=None, df=5):
                     # context_timestamp
                     elif i == 16:
                         value = int(split[i])
-                        week, hour = get_week_day(value)
+                        _, week, hour = get_week_day(value)
                         feature_each.append('week_' + str(week))
                         feature_each.append('hour_' + hour)
                         add_dict('week_' + str(week), feature_cnt)
@@ -132,7 +134,7 @@ def input_data(path=None, df=5):
 
     featmap = dict(zip(sorted(filter_cnt.keys()), range(len(filter_cnt))))
     sample = np.array(
-        [each[-4:]+[featmap.get(v, -1) for v in each[:-4] if featmap.get(v, -1) >= 0]
+        [each[-4:] + [featmap.get(v, -1) for v in each[:-4] if featmap.get(v, -1) >= 0]
          for each in feature_all])
     sample_len = len(sample)
     perm = np.arange(sample_len)
@@ -158,6 +160,26 @@ def input_data(path=None, df=5):
     test = DataSet(test_features, test_labels)
 
     return train, valuate, test, featmap
+
+
+def read_input_as_df(_path):
+    raw_data = pd.read_table(_path, sep=' ')
+    dropped_cols = ['instance_id', 'user_id', 'context_id']
+    raw_data.drop(dropped_cols, axis=1, inplace=True)
+    discrete_cols = ['item_id', 'item_brand_id', 'item_city_id', 'item_price_level', 'item_sales_level',
+                     'item_collected_level','item_pv_level', 'user_gender_id', 'user_gender_id',
+                     'user_occupation_id', 'user_star_level', 'context_page_id', 'shop_id',
+                     'shop_review_num_level', 'shop_star_level']
+    join_cols = ['item_category_list', 'item_property_list']
+    for col in discrete_cols:
+        raw_data[col] = raw_data[col].map(lambda x: col + '_' + str(x))
+    for col in join_cols:
+        raw_data[col] = raw_data[col].map(lambda x: ','.join([col.replace('list', '') + str(v) for v in x.split(';')]))
+    # context_timestamp
+    maps = {'day': 0, 'week': 1, 'hour': 2}
+    for i in maps:
+        raw_data[i] = raw_data['context_timestamp'].map(lambda x: get_week_day(x)[maps[i]])
+    return raw_data
 
 
 if __name__ == '__main__':
