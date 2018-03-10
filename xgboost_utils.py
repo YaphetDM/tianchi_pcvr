@@ -3,6 +3,7 @@
 import time
 from codecs import open
 from datetime import datetime
+
 import numpy as np
 import pandas as pd
 
@@ -41,10 +42,28 @@ class DataSet(object):
 
 
 def add_dict(feat_value, _dict=None):
-    if feat_value not in _dict:
-        _dict.setdefault(feat_value, 1)
+    if isinstance(feat_value, str):
+        if feat_value not in _dict:
+            _dict.setdefault(feat_value, 1)
+        else:
+            _dict[feat_value] += 1
+    elif isinstance(feat_value, list):
+        for each in feat_value:
+            if each not in _dict:
+                _dict.setdefault(each, 1)
+            else:
+                _dict[each] += 1
     else:
-        _dict[feat_value] += 1
+        pass
+
+
+def map_from_dict(feat_value, _dict=None):
+    if isinstance(feat_value, str):
+        return _dict.get(feat_value, -1)
+    elif isinstance(feat_value, list):
+        return [_dict.get(each, -1) for each in feat_value]
+    else:
+        return feat_value
 
 
 def get_week_day(value, day_format='%Y-%m-%d', time_format='%Y-%m-%d-%H'):
@@ -53,7 +72,7 @@ def get_week_day(value, day_format='%Y-%m-%d', time_format='%Y-%m-%d-%H'):
     format_time = time.strftime(time_format, value)
     year, month, day, hour = format_time.split('-')
     dt = datetime(year=int(year), month=int(month), day=int(day))
-    return format_day, dt.weekday(), hour
+    return format_day, str(dt.weekday()), hour
 
 
 def get_predict_category_property(_str=None):
@@ -162,24 +181,42 @@ def input_data(path=None, df=5):
     return train, valuate, test, featmap
 
 
-def read_input_as_df(_path):
+def read_input_as_df(_path, cond_day, df=5,is_train=True):
     raw_data = pd.read_table(_path, sep=' ')
-    dropped_cols = ['instance_id', 'user_id', 'context_id']
+    feat_cnt = {}
+    dropped_cols = ['instance_id', 'user_id', 'context_id', 'predict_category_property']
     raw_data.drop(dropped_cols, axis=1, inplace=True)
     discrete_cols = ['item_id', 'item_brand_id', 'item_city_id', 'item_price_level', 'item_sales_level',
-                     'item_collected_level','item_pv_level', 'user_gender_id', 'user_gender_id',
+                     'item_collected_level', 'item_pv_level', 'user_gender_id', 'user_gender_id',
                      'user_occupation_id', 'user_star_level', 'context_page_id', 'shop_id',
                      'shop_review_num_level', 'shop_star_level']
     join_cols = ['item_category_list', 'item_property_list']
+    real_value_cols = ['shop_review_positive_rate', 'shop_score_service',
+                       'shop_score_delivery', 'shop_score_description']
     for col in discrete_cols:
         raw_data[col] = raw_data[col].map(lambda x: col + '_' + str(x))
+
     for col in join_cols:
-        raw_data[col] = raw_data[col].map(lambda x: ','.join([col.replace('list', '') + str(v) for v in x.split(';')]))
+        raw_data[col] = raw_data[col].map(lambda x: [col.replace('list', '') + str(v) for v in x.split(';')])
+
     # context_timestamp
     maps = {'day': 0, 'week': 1, 'hour': 2}
     for i in maps:
-        raw_data[i] = raw_data['context_timestamp'].map(lambda x: get_week_day(x)[maps[i]])
-    return raw_data
+        raw_data[i] = raw_data['context_timestamp'].map(lambda x: i + '_' + get_week_day(x)[maps[i]])
+    raw_data.drop(['day'], inplace=False, axis=1).applymap(lambda x: add_dict(x, feat_cnt))
+
+    filter_cnt = {key: feat_cnt[key] for key in feat_cnt.keys() if feat_cnt[key] >= df}
+    featmap = dict(zip(sorted(filter_cnt.keys()), range(len(filter_cnt))))
+
+    train = raw_data.where(raw_data['day'] <= 'day_' + cond_day).dropna(axis=0).drop(['day'], axis=1).applymap(
+        lambda x: map_from_dict(x, featmap))
+    test = raw_data.where(raw_data['day'] > 'day_' + cond_day).dropna(axis=0).drop(['day'], axis=1).applymap(
+        lambda x: map_from_dict(x, featmap))
+    # for col in raw_data.columns:
+    #
+    #     raw_data[col].map(lambda x: add_dict(x, feat_cnt))
+
+    return test
 
 
 if __name__ == '__main__':
