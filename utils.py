@@ -165,19 +165,32 @@ def input_data(path=None, df=5):
 
 
 def _embedding(w, indices, mode='mean'):
+    embedding = tf.nn.embedding_lookup(w, indices)
     if mode == 'mean':
-        embedding = tf.nn.embedding_lookup(w, indices)
-        return tf.reduce_mean(embedding, axis=0)
+        return tf.reduce_mean(embedding, axis=1)
     elif mode == 'softmax':
-        embedding = tf.nn.embedding_lookup(w, indices)
-        params = np.array([np.exp(-i) for i in range(len(indices))], dtype=np.float32)
+        print(indices.shape)
+        print(type(indices.shape))
+        params = np.array([np.exp(-i) for i in range(indices.shape[1])], dtype=np.float32)
+
         params = params / np.sum(params)
-        param_tensor = tf.reshape(params, (len(indices), -1))
-        return tf.reduce_sum(tf.multiply(param_tensor, embedding), axis=0)
-    return None
+        param_tensor = tf.reshape(params, (1,indices.shape[1], 1))
+        return tf.reduce_sum(tf.multiply(param_tensor, embedding), axis=1)
+    else:
+        return embedding
 
 
-# def
+def build_vec(w, indices):
+    category = indices[1]
+    indices.pop(1)
+    property = indices[1]
+    indices.pop(1)
+    real_values = tf.Variable(tf.constant(np.array(indices[-4:]).reshape((4, 1))))
+    category_vec = _embedding(w, category, mode='softmax')
+    property_vec = _embedding(w, property)
+    discrete_vec = _embedding(w, indices, 'other')
+    return tf.concat([real_values, category_vec, property_vec, discrete_vec], axis=1)
+
 
 if __name__ == '__main__':
     path = 'data/train.txt'

@@ -181,7 +181,7 @@ def input_data(path=None, df=5):
     return train, valuate, test, featmap
 
 
-def read_input_as_df(_path, cond_day, df=5,is_train=True):
+def read_input_as_df(_path, cond_day, df=5, is_train=True):
     raw_data = pd.read_table(_path, sep=' ')
     feat_cnt = {}
     dropped_cols = ['instance_id', 'user_id', 'context_id', 'predict_category_property']
@@ -204,19 +204,22 @@ def read_input_as_df(_path, cond_day, df=5,is_train=True):
     for i in maps:
         raw_data[i] = raw_data['context_timestamp'].map(lambda x: i + '_' + get_week_day(x)[maps[i]])
     raw_data.drop(['day'], inplace=False, axis=1).applymap(lambda x: add_dict(x, feat_cnt))
+    for col in real_value_cols:
+        raw_data[col + '_'] = raw_data[col]
+        raw_data.drop([col], axis=1, inplace=True)
 
     filter_cnt = {key: feat_cnt[key] for key in feat_cnt.keys() if feat_cnt[key] >= df}
     featmap = dict(zip(sorted(filter_cnt.keys()), range(len(filter_cnt))))
 
     train = raw_data.where(raw_data['day'] <= 'day_' + cond_day).dropna(axis=0).drop(['day'], axis=1).applymap(
-        lambda x: map_from_dict(x, featmap))
+        lambda x: map_from_dict(x, featmap)).drop(['context_timestamp'], axis=1)
     test = raw_data.where(raw_data['day'] > 'day_' + cond_day).dropna(axis=0).drop(['day'], axis=1).applymap(
-        lambda x: map_from_dict(x, featmap))
-    # for col in raw_data.columns:
-    #
-    #     raw_data[col].map(lambda x: add_dict(x, feat_cnt))
-
-    return test
+        lambda x: map_from_dict(x, featmap)).drop(['context_timestamp'], axis=1)
+    x_train = train.drop(['is_trade'], axis=1)
+    y_train = train['is_trade']
+    x_test = test.drop(['is_trade'], axis=1)
+    y_test = test['is_trade']
+    return featmap, x_train, y_train, x_test, y_test
 
 
 if __name__ == '__main__':
