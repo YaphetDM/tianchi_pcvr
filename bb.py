@@ -11,6 +11,7 @@ import tensorflow as tf
 def mean(x, axis=1):
     return K.mean(x, axis=axis)
 
+
 def softmax(x):
     def get_array(y):
         none_zero_num = tf.count_nonzero(y,axis=0)
