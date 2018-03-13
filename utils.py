@@ -164,20 +164,37 @@ def input_data(path=None, df=5):
     # return feature_cnt, feature_all
 
 
-def _embedding(w, indices, mode='mean'):
-    embedding = tf.nn.embedding_lookup(w, indices)
-    if mode == 'mean':
-        return tf.reduce_mean(embedding, axis=1)
-    elif mode == 'softmax':
-        print(indices.shape)
-        print(type(indices.shape))
-        params = np.array([np.exp(-i) for i in range(indices.shape[1])], dtype=np.float32)
+def singal_softmax_embedding(w,indices):
+    embedding = tf.nn.embedding_lookup(w,indices)
+    print(indices.eavl())
+    params = tf.map_fn(fn=lambda x:tf.exp(-x),elems=tf.range(indices.shape[0]))
+    # params = np.array([np.exp(-i) for i in range(indices.shape[0])], dtype=np.float32)
+    params = params / tf.reduce_sum(params)
+    param_tensor = tf.reshape(params, (indices.shape[0], 1))
+    return tf.reduce_sum(tf.multiply(param_tensor, embedding), axis=1)
 
-        params = params / np.sum(params)
-        param_tensor = tf.reshape(params, (1,indices.shape[1], 1))
-        return tf.reduce_sum(tf.multiply(param_tensor, embedding), axis=1)
-    else:
-        return embedding
+
+def _embedding(w, indices, max_len=4, mode='mean'):
+    def softmax_embedding(x):
+        embedding = tf.nn.embedding_lookup(w, x)
+        none_zero_num = tf.cast(tf.count_nonzero(x - 6), tf.int32)
+        # shape = embedding.get_shape()[0].value
+        if mode == 'mean':
+            # params = 0.5*tf.ones((6 - none_zero_num_int,1))
+            param_tensor = tf.concat([0.5 * tf.ones((none_zero_num, 1)), tf.zeros((max_len - none_zero_num, 1))],
+                                     axis=0)
+            return tf.reduce_sum(tf.multiply(param_tensor, embedding), axis=0)
+            # return param_tensor
+        elif mode == 'softmax':
+            params = tf.map_fn(lambda i: tf.exp(-i), elems=tf.range(tf.cast(none_zero_num, tf.float32)))
+            param_tensor = tf.concat([tf.reshape(params/tf.reduce_sum(params), (none_zero_num, 1)),
+                                      tf.zeros((max_len - none_zero_num, 1))],axis=0)
+            return tf.reduce_sum(tf.multiply(param_tensor, embedding), axis=0)
+        else:
+            return None
+
+    return tf.map_fn(
+        lambda each: softmax_embedding(each), elems=indices, dtype=tf.float32)
 
 
 def build_vec(w, indices):
