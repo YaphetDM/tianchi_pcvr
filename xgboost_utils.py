@@ -75,20 +75,6 @@ def get_week_day(value, day_format='%Y-%m-%d', time_format='%Y-%m-%d-%H'):
     return format_day, str(dt.weekday()), hour
 
 
-def get_predict_category_property(_str=None):
-    res = []
-    for each in _str.split(';'):
-        if each.split(':')[1] == '-1':
-            continue
-        else:
-            category = each.split(':')[0]
-            res.extend(['predict_category_property_' + category + '_' + pro
-                        for pro in each.split(':')[1].split(',')])
-    return res
-
-
-# def yield_train_data()
-
 def input_data(path=None, df=5):
     _len = 0
     feature = None
@@ -181,51 +167,91 @@ def input_data(path=None, df=5):
     return train, valuate, test, featmap
 
 
-def read_input_as_df(_path, cond_day, df=5, is_train=True):
-    raw_data = pd.read_table(_path, sep=' ')
-    feat_cnt = {}
-    dropped_cols = ['instance_id', 'user_id', 'context_id', 'predict_category_property']
-    raw_data.drop(dropped_cols, axis=1, inplace=True)
+def merge(x, y):
+    tmp = [v for v in x if v in y]
+    if len(tmp) == 2:
+        return tmp
+    elif len(tmp) == 1:
+        return tmp + [0]
+    else:
+        return [0, 0]
+
+
+def long_tail(series, size, pct=0.99):
+    idx = 0
+    cnt = 0
+    threshold = int(size * pct)
+    while cnt < threshold:
+        cnt += series[idx]
+        idx += 1
+    return series.index.tolist()[:idx]
+
+
+def read_input_as_df(file_path, cond_day='2018-09-23'):
+    useless_cols = ['instance_id', 'user_id', 'context_id']
+
     discrete_cols = ['item_id', 'item_brand_id', 'item_city_id', 'item_price_level', 'item_sales_level',
-                     'item_collected_level', 'item_pv_level', 'user_gender_id', 'user_gender_id',
+                     'item_collected_level', 'item_pv_level', 'user_gender_id', 'user_age_level',
                      'user_occupation_id', 'user_star_level', 'context_page_id', 'shop_id',
                      'shop_review_num_level', 'shop_star_level']
-    join_cols = ['item_category_list', 'item_property_list']
+
+    drop_long_tail_cols = ['item_id', 'item_brand_id', 'shop_id']
+
     real_value_cols = ['shop_review_positive_rate', 'shop_score_service',
                        'shop_score_delivery', 'shop_score_description']
+
+    raw_data = pd.read_table(file_path, sep=' ')
+
+    # 去掉无用特征
+    raw_data.drop(useless_cols, axis=1, inplace=True)
+
+    # 修改离散特征
     for col in discrete_cols:
         raw_data[col] = raw_data[col].map(lambda x: col + '_' + str(x))
 
-    for col in join_cols:
-        raw_data[col] = raw_data[col].map(lambda x: [col.replace('list', '') + str(v) for v in x.split(';')])
+    # 获取predict_category与category_list的交集，因为category_list所有的一级标签均相同
+    predict_category = raw_data['predict_category_property'].map(lambda x: [v.split(':')[0] for v in x.split(';')])
+    category_list = raw_data['item_category_list'].map(lambda x: x.split(';')[1:])
+    category_join = category_list.combine(predict_category, lambda x, y: merge(x, y)).map(
+        lambda x: ['category_join_' + str(s) for s in x])
+    category_join_left = category_join.map(lambda x: x[0])
+    category_join_right = category_join.map(lambda x: x[1])
+    raw_data['category_join_left'] = category_join_left
+    raw_data['category_join_right'] = category_join_right
+    raw_data.drop(['predict_category_property', 'item_category_list', 'item_property_list'], axis=1, inplace=True)
 
-    # context_timestamp
+    # 将context_timestamp分解成day weekday hour
     maps = {'day': 0, 'week': 1, 'hour': 2}
-    for i in maps:
-        raw_data[i] = raw_data['context_timestamp'].map(lambda x: i + '_' + get_week_day(x)[maps[i]])
-    raw_data.drop(['day'], inplace=False, axis=1).applymap(lambda x: add_dict(x, feat_cnt))
-    for col in real_value_cols:
-        raw_data[col + '_'] = raw_data[col]
-        raw_data.drop([col], axis=1, inplace=True)
+    for j in maps:
+        raw_data[j] = raw_data['context_timestamp'].map(lambda x: j + '_' + get_week_day(x)[maps[j]])
 
-    filter_cnt = {key: feat_cnt[key] for key in feat_cnt.keys() if feat_cnt[key] >= df}
-    featmap = dict(zip(sorted(filter_cnt.keys()), range(len(filter_cnt))))
+    # 构建训练数据和测试数据
+    train = raw_data.where(raw_data['day'] <= 'day_' + cond_day).dropna(axis=0)
+    test = raw_data.where(raw_data['day'] > 'day_' + cond_day).dropna(axis=0)
 
-    train = raw_data.where(raw_data['day'] <= 'day_' + cond_day).dropna(axis=0).drop(['day'], axis=1).applymap(
-        lambda x: map_from_dict(x, featmap)).drop(['context_timestamp'], axis=1)
-    test = raw_data.where(raw_data['day'] > 'day_' + cond_day).dropna(axis=0).drop(['day'], axis=1).applymap(
-        lambda x: map_from_dict(x, featmap)).drop(['context_timestamp'], axis=1)
-    x_train = train.drop(['is_trade'], axis=1)
-    y_train = train['is_trade']
-    x_test = test.drop(['is_trade'], axis=1)
-    y_test = test['is_trade']
-    return featmap, x_train, y_train, x_test, y_test
+    # 对于实数特征缺失值补中位数or均值
+    for k in real_value_cols:
+        median = train[k].median()
+        train[k].replace(-1, median, inplace=True)
+        test[k].replace(-1, median, inplace=True)
+
+    train.drop(['context_timestamp', 'day'], axis=1, inplace=True)
+    test.drop(['context_timestamp', 'day'], axis=1, inplace=True)
+    features = []
+    train_size = train.shape[0]
+    for col in drop_long_tail_cols:
+        series = train[col].value_counts()
+        features.extend(long_tail(series, size=train_size))
+    for col in discrete_cols + ['hour', 'week', 'category_join_left', 'category_join_right']:
+        if col not in drop_long_tail_cols:
+            series = train[col].value_counts()
+            features.extend(series.index.tolist())
+    features = [v for v in features if '_-1' not in v]
+    return features, train
 
 
 if __name__ == '__main__':
     path = 'data/train.txt'
-    train, valuate, test, featmap = input_data(path)
-    for i in featmap:
-        print(i, featmap[i])
-    for each in train.features():
-        print(each)
+    rs = read_input_as_df(path)
+    print(len(np.unique(['_'.join(v.split('_')[:-1]) for v in rs[0]])))
+    print(rs[1].columns.tolist())
