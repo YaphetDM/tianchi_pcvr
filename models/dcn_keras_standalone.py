@@ -118,7 +118,7 @@ class DeepCrossNetwork(object):
         return self.model
 
     def get_concat(self):
-        pass
+        return
 
     def loss(self):
         pass
