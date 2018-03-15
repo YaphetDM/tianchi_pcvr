@@ -40,7 +40,7 @@ class DataSet(object):
         return self._features[start:end].tolist(), self._labels[start:end].tolist()
 
 
-def get_week_day(value, day_format='%Y-%m-%d', time_format='%Y-%m-%d-%H'):
+def get_day_hour(value, day_format='%Y-%m-%d', time_format='%Y-%m-%d-%H'):
     value = time.localtime(value)
     format_day = time.strftime(day_format, value)
     format_time = time.strftime(time_format, value)
@@ -120,7 +120,7 @@ def read_input(file_path, cond_day='2018-09-23'):
     # 将context_timestamp分解成day weekday hour
     maps = {'day': 0, 'week': 1, 'hour': 2}
     for j in maps:
-        raw_data[j] = raw_data['context_timestamp'].map(lambda x: j + '_' + get_week_day(x)[maps[j]])
+        raw_data[j] = raw_data['context_timestamp'].map(lambda x: j + '_' + get_day_hour(x)[maps[j]])
 
     # 构建训练数据和测试数据
     train = raw_data.where(raw_data['day'] <= 'day_' + cond_day).dropna(axis=0)
