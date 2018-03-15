@@ -99,7 +99,7 @@ def long_tail(series, size, pct=0.99):
     return series.index.tolist()[:idx]
 
 
-def read_input_as_df(file_path, cond_day='2018-09-23'):
+def read_input(file_path, cond_day='2018-09-23'):
     useless_cols = ['instance_id', 'user_id', 'context_id']
 
     discrete_cols = ['item_id', 'item_brand_id', 'item_city_id', 'item_price_level', 'item_sales_level',
@@ -179,7 +179,7 @@ def read_input_as_df(file_path, cond_day='2018-09-23'):
 
 
 if __name__ == '__main__':
-    path = 'data/train.txt'
+    file_path = 'data/train.txt'
     featmap, train_real_value, train_discrete, train_labels, \
-        test_real_value, test_discrete, test_labels = read_input_as_df(path)
+        test_real_value, test_discrete, test_labels = read_input(file_path)
     print(train_real_value)
