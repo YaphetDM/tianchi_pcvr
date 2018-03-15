@@ -70,10 +70,11 @@ def long_tail(series, size, pct=0.99):
     idx = 0
     cnt = 0
     threshold = int(size * pct)
+    feature_list = series.index.tolist()
     while cnt < threshold:
-        cnt += series[idx]
+        cnt += series[feature_list[idx]]
         idx += 1
-    return series.index.tolist()[:idx]
+    return feature_list[:idx]
 
 
 def read_input(file_path, cond_day='2018-09-23'):
