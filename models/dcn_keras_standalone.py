@@ -32,14 +32,13 @@ class CrossLayer(Layer):
             )
         self.built = True
 
-    def call(self, x):
+    def call(self, inputs):
         cross = None
         for i in range(self.num_layer):
-            cross = None
             if i == 0:
                 cross = Lambda(lambda x: Add()(
                     [K.sum(self.W[i] * K.batch_dot(K.reshape(x, (-1, self.input_dim, 1)), x), 1, keepdims=True),
-                     self.bias[i], x]))(x)
+                     self.bias[i], x]))(inputs)
             else:
                 cross = Lambda(lambda x: Add()(
                     [K.sum(self.W[i] * K.batch_dot(K.reshape(x, (-1, self.input_dim, 1)), x), 1, keepdims=True),
