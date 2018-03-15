@@ -40,31 +40,6 @@ class DataSet(object):
         return self._features[start:end].tolist(), self._labels[start:end].tolist()
 
 
-def add_dict(feat_value, _dict=None):
-    if isinstance(feat_value, str):
-        if feat_value not in _dict:
-            _dict.setdefault(feat_value, 1)
-        else:
-            _dict[feat_value] += 1
-    elif isinstance(feat_value, list):
-        for each in feat_value:
-            if each not in _dict:
-                _dict.setdefault(each, 1)
-            else:
-                _dict[each] += 1
-    else:
-        pass
-
-
-def map_from_dict(feat_value, _dict=None):
-    if isinstance(feat_value, str):
-        return _dict.get(feat_value, -1)
-    elif isinstance(feat_value, list):
-        return [_dict.get(each, -1) for each in feat_value]
-    else:
-        return feat_value
-
-
 def get_week_day(value, day_format='%Y-%m-%d', time_format='%Y-%m-%d-%H'):
     value = time.localtime(value)
     format_day = time.strftime(day_format, value)
