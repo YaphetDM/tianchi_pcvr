@@ -151,7 +151,7 @@ def read_input(file_path, cond_day='2018-09-23'):
 
     features = [v for v in features if '_-1' not in v]
     # 生成featmap
-    featmap = dict(zip(features, range(1, len(features) + 1)))
+    featmap = dict(zip(np.unique(features), range(1, len(features) + 1)))
 
     train_real_value = train[real_value_cols]
     # 训练数据feature to index mapping
