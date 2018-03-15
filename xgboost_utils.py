@@ -114,7 +114,7 @@ def read_input_as_df(file_path, cond_day='2018-09-23'):
     create_cols = ['hour', 'week', 'category_join_first', 'category_join_second', 'category_join_third']
 
     raw_data = pd.read_table(file_path, sep=' ')
-
+    # 去掉完全一样的特征
     raw_data.drop_duplicates(inplace=True)
     # 去掉无用特征
     raw_data.drop(useless_cols, axis=1, inplace=True)
@@ -183,4 +183,4 @@ if __name__ == '__main__':
     featmap, train_real_value, train_discrete, train_labels, \
         test_real_value, test_discrete, test_labels = read_input_as_df(path)
     print(featmap)
-    print(train_discrete)
+    print(train_discrete[0])
