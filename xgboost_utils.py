@@ -100,26 +100,32 @@ def long_tail(series, size, pct=0.99):
 
 
 def read_input(file_path, cond_day='2018-09-23'):
+    # 无用特征
     useless_cols = ['instance_id', 'user_id', 'context_id']
 
+    # 离散特征
     discrete_cols = ['item_id', 'item_brand_id', 'item_city_id', 'item_price_level', 'item_sales_level',
                      'item_collected_level', 'item_pv_level', 'user_gender_id', 'user_age_level',
                      'user_occupation_id', 'user_star_level', 'context_page_id', 'shop_id',
                      'shop_review_num_level', 'shop_star_level']
 
+    # 需要去长尾的特征
     drop_long_tail_cols = ['item_id', 'item_brand_id', 'shop_id']
 
+    # 实值特征
     real_value_cols = ['shop_review_positive_rate', 'shop_score_service',
                        'shop_score_delivery', 'shop_score_description']
+
+    # 新建特征
     create_cols = ['hour', 'week', 'category_join_first', 'category_join_second', 'category_join_third']
 
     raw_data = pd.read_table(file_path, sep=' ')
-    # 去掉完全一样的特征
+    # 去掉完全一样的数据
     raw_data.drop_duplicates(inplace=True)
     # 去掉无用特征
     raw_data.drop(useless_cols, axis=1, inplace=True)
 
-    # 修改离散特征
+    # 生成离散特征
     for col in discrete_cols:
         raw_data[col] = raw_data[col].map(lambda x: col + '_' + str(x))
 
@@ -155,6 +161,7 @@ def read_input(file_path, cond_day='2018-09-23'):
         train[k].replace(-1, mean, inplace=True)
         test[k].replace(-1, mean, inplace=True)
 
+    # 特征统计
     features = []
     train_size = train.shape[0]
     for col in drop_long_tail_cols:
@@ -165,15 +172,19 @@ def read_input(file_path, cond_day='2018-09-23'):
             series = train[col].value_counts()
             features.extend(series.index.tolist())
     features = [v for v in features if '_-1' not in v]
+    # 生成featmap
     featmap = dict(zip(features, range(1, len(features) + 1)))
+
     train_real_value = train[real_value_cols]
-    train_discrete = train[discrete_cols + create_cols]
-    train_discrete = train_discrete.applymap(lambda x: featmap.get(x, 0))
+    # 训练数据feature to index mapping
+    train_discrete = train[discrete_cols + create_cols].applymap(lambda x: featmap.get(x, 0))
     train_labels = train['is_trade']
+
     test_real_value = test[real_value_cols]
-    test_discrete = test[discrete_cols + create_cols]
-    test_discrete = test_discrete.applymap(lambda x: featmap.get(x, 0))
+    # 测试数据feature to index mapping
+    test_discrete = test[discrete_cols + create_cols].applymap(lambda x: featmap.get(x, 0))
     test_labels = test['is_trade']
+
     return featmap, train_real_value.values, train_discrete.values, train_labels.values, \
         test_real_value.values, test_discrete.values, test_labels.values
 
