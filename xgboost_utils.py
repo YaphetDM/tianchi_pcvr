@@ -153,12 +153,12 @@ def read_input(file_path, cond_day='2018-09-23'):
     # 生成featmap
     featmap = dict(zip(np.unique(features), range(1, len(features) + 1)))
 
-    train_real_value = train[real_value_cols]
+    train_real_value = train[real_value_cols].applymap(lambda x: 0.1*x)
     # 训练数据feature to index mapping
     train_discrete = train[discrete_cols + create_cols].applymap(lambda x: featmap.get(x, 0))
     train_labels = train['is_trade']
 
-    test_real_value = test[real_value_cols]
+    test_real_value = test[real_value_cols].applymap(lambda x: 0.1*x)
     # 测试数据feature to index mapping
     test_discrete = test[discrete_cols + create_cols].applymap(lambda x: featmap.get(x, 0))
     test_labels = test['is_trade']
