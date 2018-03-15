@@ -60,8 +60,10 @@ def merge(x, y):
         return tmp
     elif len(tmp) == 2:
         return tmp + [0]
-    else:
+    elif len(tmp) == 1:
         return tmp + [0, 0]
+    else:
+        return [0, 0, 0]
 
 
 def long_tail(series, size, pct=0.99):
@@ -104,7 +106,7 @@ def read_input(file_path, cond_day='2018-09-23'):
     for col in discrete_cols:
         raw_data[col] = raw_data[col].map(lambda x: col + '_' + str(x))
 
-    # 获取predict_category与category_list的交集，因为category_list所有的一级标签均相同
+    # 获取predict_category与category_list的交集, 将category_list长度扩展到3, 不够用0补齐
     predict_category = raw_data['predict_category_property'].map(lambda x: [v.split(':')[0] for v in x.split(';')])
     category_list = raw_data['item_category_list'].map(lambda x: x.split(';'))
     category_join = category_list.combine(predict_category, lambda x, y: merge(x, y)).map(
