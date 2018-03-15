@@ -182,5 +182,4 @@ if __name__ == '__main__':
     path = 'data/train.txt'
     featmap, train_real_value, train_discrete, train_labels, \
         test_real_value, test_discrete, test_labels = read_input_as_df(path)
-    print(featmap)
-    print(train_discrete[0])
+    print(train_real_value)
