@@ -139,13 +139,13 @@ def read_input(file_path, cond_day='2018-09-23'):
     # 特征统计
     features = []
     train_size = train.shape[0]
-    for col in drop_long_tail_cols:
-        series = train[col].value_counts()
-        features.extend(long_tail(series, size=train_size))
     for col in discrete_cols + create_cols:
-        if col not in drop_long_tail_cols:
-            series = train[col].value_counts()
+        series = train[col].value_counts()
+        if col in drop_long_tail_cols:
+            features.extend(long_tail(series, size=train_size))
+        else:
             features.extend(series.index.tolist())
+
     features = [v for v in features if '_-1' not in v]
     # 生成featmap
     featmap = dict(zip(features, range(1, len(features) + 1)))
@@ -168,4 +168,4 @@ if __name__ == '__main__':
     file_path = 'data/train.txt'
     featmap, train_real_value, train_discrete, train_labels, \
         test_real_value, test_discrete, test_labels = read_input(file_path)
-    print(train_real_value)
+    print(train_discrete[0])
