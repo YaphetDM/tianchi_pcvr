@@ -171,4 +171,4 @@ if __name__ == '__main__':
     file_path = 'data/train.txt'
     featmap, train_real_value, train_discrete, train_labels, \
         test_real_value, test_discrete, test_labels = read_input(file_path)
-    print(train_discrete[0])
+    print(len(featmap))

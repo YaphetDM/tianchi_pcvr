@@ -5,8 +5,19 @@ from keras import backend as K
 from keras.layers import Input, Reshape, Embedding, Concatenate, Add, Lambda, Flatten, Dense, Dropout
 from keras.layers import Layer
 from keras.models import Model
-
+import numpy as np
 from xgboost_utils import read_input
+import os
+from keras.backend.tensorflow_backend import set_session
+import tensorflow as tf
+import xgboost as xgb
+from sklearn.metrics import auc
+
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"  # see issue #152
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
+config = tf.ConfigProto()
+config.gpu_options.per_process_gpu_memory_fraction = 0.5
+set_session(tf.Session(config=config))
 
 
 class CrossLayer(Layer):
@@ -32,7 +43,6 @@ class CrossLayer(Layer):
         self.built = True
 
     def call(self, inputs, **kwargs):
-
         cross = None
         for i in range(self.num_layer):
             if i == 0:
@@ -52,12 +62,13 @@ class CrossLayer(Layer):
 
 
 class DeepCrossNetwork(object):
-    def __init__(self, field_dim, feature_dim, embedding_size, cross_layer_num,
+    def __init__(self, field_dim, feature_dim, embedding_size, batch_size, cross_layer_num,
                  hidden_size, init_std, seed, embed_reg, cross_reg, dense_reg, output_reg,
                  lr, epoch, keep_prob):
         self.field_dim = field_dim
         self.feature_dim = feature_dim
         self.embedding_size = embedding_size
+        self.batch_size = batch_size
         self.seed = seed
 
         self.cross_layer_num = cross_layer_num
@@ -88,8 +99,37 @@ class DeepCrossNetwork(object):
                                    stddev=self.init_std),
                                kernel_regularizer=keras.regularizers.l2(self.dense_reg))(input)
                 # output = K.dropout(output, self.keep_prob)
-                output = Dropout(self.keep_prob)(output)
+                # output = Dropout(self.keep_prob)(output)
         return output
+
+    def binary_PFA(self, y_true, y_pred, threshold=K.variable(value=0.5)):
+        y_pred = K.cast(y_pred >= threshold, 'float32')
+        # N = total number of negative labels
+        N = K.sum(1 - y_true)
+        # FP = total number of false alerts, alerts from the negative class labels
+        FP = K.sum(y_pred - y_pred * y_true)
+        return FP / N
+
+    def binary_PTA(self, y_true, y_pred, threshold=K.variable(value=0.5)):
+        y_pred = K.cast(y_pred >= threshold, 'float32')
+        # P = total number of positive labels
+        P = K.sum(y_true)
+        # TP = total number of correct alerts, alerts from the positive class labels
+        TP = K.sum(y_pred * y_true)
+        return TP / P
+
+    def auc(self, y_true, y_pred):
+        ptas = tf.stack([self.binary_PTA(y_true, y_pred, k) for k in np.linspace(0, 1, 1000)], axis=0)
+        pfas = tf.stack([self.binary_PFA(y_true, y_pred, k) for k in np.linspace(0, 1, 1000)], axis=0)
+        pfas = tf.concat([tf.ones((1,)), pfas], axis=0)
+        binSizes = -(pfas[1:] - pfas[:-1])
+        s = ptas * binSizes
+        return K.sum(s, axis=0)
+
+    def xgb_auc(self, inputs, labels):
+        inputs = xgb.DMatrix(inputs)
+        prediction = self.xgb_model.predict(inputs)
+        return auc(prediction, labels)
 
     def build_model(self):
         embeddings = Embedding(self.feature_dim + 1, self.embedding_size,
@@ -102,32 +142,75 @@ class DeepCrossNetwork(object):
 
         cross_network_out = CrossLayer(self.input_dim,
                                        self.cross_layer_num, self.cross_reg)(features)
-        # self.hidden_size[-1]+self.input_size
+        # self.hidden_size[-1]+ self.field_dim[0] + self.field_dim[1] * self.embedding_size
         self.concat = Concatenate(axis=1, name='concat')([dense_network_out, cross_network_out])
-        self.output = Dense(1, activation='sigmoid',
-                            kernel_initializer=keras.initializers.truncated_normal(stddev=self.init_std),
-                            kernel_regularizer=keras.regularizers.l2(self.output_reg))(self.concat)
-        return Model([self.real_value_input, self.discrete_input], [self.output])
+        output = Dense(1, activation='sigmoid',
+                       kernel_initializer=keras.initializers.truncated_normal(stddev=self.init_std),
+                       kernel_regularizer=keras.regularizers.l2(self.output_reg))(self.concat)
+        return Model([self.real_value_input, self.discrete_input], [output])
 
     def train(self, inputs, labels):
+        print('dcn training step...')
         self.model = self.build_model()
         self.model.compile(optimizer=keras.optimizers.Adam(self.lr),
                            loss=keras.losses.binary_crossentropy,
-                           metrics=[keras.metrics.binary_crossentropy])
-        self.model.fit(inputs, labels, epochs=self.epoch)
-        return self.model
+                           metrics=[keras.metrics.binary_crossentropy, self.auc])
+        self.model.fit(inputs, labels, batch_size=self.batch_size, epochs=self.epoch)
 
-    def get_concat(self):
-        return
+    def evaluate_dcn(self, inputs, labels):
+        print('dcn evaluate step...')
+        _, cross_entropy = self.model.evaluate(inputs, labels, batch_size=self.batch_size * 2)
+        print('dcn evaluation loss ', cross_entropy)
+        #
+        # prediction = self.model.predict(inputs, batch_size=self.batch_size)
+        # cross_entropy = self._cross_entropy(prediction, labels)
+        # print("dcn cross entropy: ", cross_entropy)
 
-    def loss(self):
-        pass
+    def get_concat(self, inputs):
+        concat_model = Model(self.model.inputs, [self.concat])
+        return concat_model.predict(inputs, batch_size=self.batch_size * 2)
+
+    def _cross_entropy(self, prediction, labels):
+        return -np.mean(np.log(prediction) * labels) - np.mean(np.log(1 - prediction) - np.log(1 - prediction) * labels)
+
+    def xgb_train_with_concat(self, features, labels, params):
+        print('xgb training...')
+        dtrain = xgb.DMatrix(self.get_concat(features), labels)
+        self.xgb_model = xgb.train(dtrain=dtrain, num_boost_round=30, params=params)
+
+    def evaluate_xgb(self, inputs, labels):
+        print('xgb evaluate step ...')
+        concat = self.get_concat(inputs)
+        dtest = xgb.DMatrix(concat)
+        self.output = self.xgb_model.predict(dtest)
+        cross_entropy = self._cross_entropy(self.output, labels)
+        print('cross entropy added with xgb: ', cross_entropy)
 
 
 if __name__ == '__main__':
+    params = {'booster': 'gbtree',
+              'objective': 'binary:logistic',
+              'eval_metric': 'logloss',
+              'max_depth': 3,
+              'alpha': 5,
+              'subsample': 0.75,
+              'colsample_bytree': 0.75,
+              'min_child_weight': 2,
+              'eta': 0.2,
+              'seed': 1024,
+              'nthread': 8,
+              'silent': 1}
     file_path = '../data/train.txt'
     featmap, train_real_value, train_discrete, train_labels, test_real_value, test_discrete, test_labels = read_input(
         file_path)
-    dcn = DeepCrossNetwork([4, 20], 168, 10, 2, [10, 10, 10], 0.1, 1024, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3, 3, 0.5)
-    model = dcn.train([train_real_value, train_discrete], train_labels)
-    print(dcn.get_concat())
+    features_len = len(featmap)
+    print('feature length ', features_len)
+    # dcn = DeepCrossNetwork([4, 20], features_len, 32, 256, 6, [32, 32, 64, 64], 0.1, 1024, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3,
+    #                        5, 0.5)
+    dcn = DeepCrossNetwork([4, 20], features_len, 8, 256, 6, [32, 32], 0.1, 1024, 1e-3, 1e-3, 1e-3, 1e-3, 5e-2,
+                           5, 0.5)
+    dcn.train([train_real_value, train_discrete], train_labels)
+    dcn.evaluate_dcn([train_real_value, train_discrete], train_labels)
+    dcn.xgb_train_with_concat([train_real_value, train_discrete], train_labels, params)
+    dcn.evaluate_xgb([train_real_value, train_discrete], train_labels)
+    # print(model.output)
