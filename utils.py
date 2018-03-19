@@ -1,9 +1,10 @@
 # coding:utf-8
+
 import time
-from codecs import open
 from datetime import datetime
+
 import numpy as np
-import tensorflow as tf
+import pandas as pd
 
 
 class DataSet(object):
@@ -39,180 +40,142 @@ class DataSet(object):
         return self._features[start:end].tolist(), self._labels[start:end].tolist()
 
 
-def add_dict(feat_value, _dict=None):
-    if feat_value not in _dict:
-        _dict.setdefault(feat_value, 1)
-    else:
-        _dict[feat_value] += 1
-
-
-def get_week_day(value, _format='%Y-%m-%d-%H'):
+def get_day_hour(value, time_format='%Y-%m-%d-%H'):
     value = time.localtime(value)
-    format_time = time.strftime(_format, value)
+    format_time = time.strftime(time_format, value)
     year, month, day, hour = format_time.split('-')
     dt = datetime(year=int(year), month=int(month), day=int(day))
-    return dt.weekday(), hour
+    return str(dt.weekday()), hour
 
 
-def get_predict_category_property(_str=None):
-    res = []
-    for each in _str.split(';'):
-        if each.split(':')[1] == '-1':
-            continue
+def merge(x, y):
+    tmp = []
+    for i in range(len(x)):
+        if x[i] in y:
+            tmp.append(x[i])
         else:
-            category = each.split(':')[0]
-            res.extend(['predict_category_property_' + category + '_' + pro
-                        for pro in each.split(':')[1].split(',')])
-    return res
+            tmp.append(0)
+    if len(tmp) == 3:
+        return tmp
+    elif len(tmp) == 2:
+        return tmp + [0]
+    elif len(tmp) == 1:
+        return tmp + [0, 0]
+    else:
+        return [0, 0, 0]
 
 
-# def yield_train_data()
-
-def input_data(path=None, df=5):
-    _len = 0
-    feature = None
-    feature_cnt = {}
-    feature_all = []
-    labels = []
-    with open(path, encoding='utf8') as content:
-        for line in content.readlines():
-            if line.startswith('instance'):
-                feature = line.strip().split(' ')
-                _len = len(feature)
-            else:
-                labels.append(float(line.strip().split(' ')[-1]))
-                feature_each = []
-                scores = []
-                split = line.strip().split(' ')
-                for i in range(1, _len - 1):
-                    # item_category_list -> 2, item_property_list -> 3
-                    if i == 2 or i == 3:
-                        feat = feature[i].replace('_list', '')
-                        value = split[i]
-                        tmp = [feat + '_' + v for v in value.split(';')]
-                        for v in tmp:
-                            feature_each.append(v)
-                            add_dict(v, feature_cnt)
-                    # context_timestamp
-                    elif i == 16:
-                        value = int(split[i])
-                        week, hour = get_week_day(value)
-                        feature_each.append('week_' + str(week))
-                        feature_each.append('hour_' + hour)
-                        add_dict('week_' + str(week), feature_cnt)
-                        add_dict('hour_' + hour, feature_cnt)
-                    # predict_category_property
-                    # 5755694407684602296:2636395404473730413;8710739180200009128:-1;
-                    # 7908382889764677758:2636395404473730413;9121432215720987772:-1;
-                    # 8257512457089702259:-1;8896700187874717254:-1
-                    elif i == 18:
-                        # for each in get_predict_category_property(split[i]):
-                        #     feature_each.append(each)
-                        #     add_dict(each, feature_cnt)
-                        pass
-
-                    else:
-                        value = split[i]
-                        # user_id,context_id,shop_review_positive_rate,shop_score_service,shop_score_delivery,shop_score_description
-                        if i not in [10, 15, 21, 23, 24, 25] and value != '-1':
-                            feature_value = feature[i] + '_' + value
-                            feature_each.append(feature_value)
-                            add_dict(feature_value, feature_cnt)
-                        # shop_review_positive_rate,shop_score_service,shop_score_delivery,shop_score_description
-                        elif i in [21, 23, 24, 25]:
-                            # feature_each.append(float(split[i]))
-                            if split[i] != '-1':
-                                score = float(split[i])
-                            else:
-                                score = 0.6
-                            scores.append(score)
-                feature_each.extend(scores)
-                feature_all.append(feature_each)
-    filter_cnt = {key: feature_cnt[key] for key in feature_cnt.keys() if feature_cnt[key] >= df}
-
-    featmap = dict(zip(sorted(filter_cnt.keys()), range(len(filter_cnt))))
-    sample = np.array(
-        [[each[-4:], [featmap.get(v, -1) for v in each[:-4] if 'item_category' in v and featmap.get(v, -1) >= 0],
-          [featmap.get(v, -1) for v in each[:-4] if 'item_property' in v and featmap.get(v, -1) >= 0],
-          [featmap.get(v, -1) for v in each[:-4]
-           if 'item_category' not in v and 'item_property' not in v]]
-         for each in feature_all])
-    sample_len = len(sample)
-    perm = np.arange(sample_len)
-    np.random.shuffle(perm)
-    # sample = sample[perm]
-    # labels = np.array(labels)[perm]
-
-    # 7 2 1
-    train_idx = int(sample_len * 0.7)
-    valuate_idx = int(sample_len * 0.9)
-
-    train_features = sample[:train_idx]
-    train_labels = labels[:train_idx]
-
-    valuate_features = sample[train_idx:valuate_idx]
-    valuate_labels = labels[train_idx:valuate_idx]
-
-    test_features = sample[valuate_idx:]
-    test_labels = labels[valuate_idx:]
-
-    train = DataSet(train_features, train_labels)
-    valuate = DataSet(valuate_features, valuate_labels)
-    test = DataSet(test_features, test_labels)
-
-    return train, valuate, test, featmap
-    # return feature_cnt, feature_all
+def long_tail(series, size, pct=0.99):
+    idx = 0
+    cnt = 0
+    threshold = int(size * pct)
+    feature_list = series.index.tolist()
+    while cnt < threshold:
+        cnt += series[feature_list[idx]]
+        idx += 1
+    return feature_list[:idx]
 
 
-def singal_softmax_embedding(w,indices):
-    embedding = tf.nn.embedding_lookup(w,indices)
-    print(indices.eavl())
-    params = tf.map_fn(fn=lambda x:tf.exp(-x),elems=tf.range(indices.shape[0]))
-    # params = np.array([np.exp(-i) for i in range(indices.shape[0])], dtype=np.float32)
-    params = params / tf.reduce_sum(params)
-    param_tensor = tf.reshape(params, (indices.shape[0], 1))
-    return tf.reduce_sum(tf.multiply(param_tensor, embedding), axis=1)
+def extract_category_property(df):
+    predict_category = df['predict_category_property'].map(
+        lambda x: [v.split(':')[0] for v in x.split(';')])
+    category_list = df['item_category_list'].map(lambda x: x.split(';'))
+    train_category_join = category_list.combine(predict_category, lambda x, y: merge(x, y)).map(
+        lambda x: ['category_join_' + str(s) for s in x])
+    train_category_join_first = train_category_join.map(lambda x: x[0])
+    train_category_join_second = train_category_join.map(lambda x: x[1])
+    train_category_join_third = train_category_join.map(lambda x: x[2])
+    df['category_join_first'] = train_category_join_first
+    df['category_join_second'] = train_category_join_second
+    df['category_join_third'] = train_category_join_third
+    df.drop(['predict_category_property', 'item_category_list', 'item_property_list'], axis=1, inplace=True)
 
 
-def _embedding(w, indices, max_len=4, mode='mean'):
-    def softmax_embedding(x):
-        embedding = tf.nn.embedding_lookup(w, x)
-        none_zero_num = tf.cast(tf.count_nonzero(x - 6), tf.int32)
-        # shape = embedding.get_shape()[0].value
-        if mode == 'mean':
-            # params = 0.5*tf.ones((6 - none_zero_num_int,1))
-            param_tensor = tf.concat([0.5 * tf.ones((none_zero_num, 1)), tf.zeros((max_len - none_zero_num, 1))],
-                                     axis=0)
-            return tf.reduce_sum(tf.multiply(param_tensor, embedding), axis=0)
-            # return param_tensor
-        elif mode == 'softmax':
-            params = tf.map_fn(lambda i: tf.exp(-i), elems=tf.range(tf.cast(none_zero_num, tf.float32)))
-            param_tensor = tf.concat([tf.reshape(params/tf.reduce_sum(params), (none_zero_num, 1)),
-                                      tf.zeros((max_len - none_zero_num, 1))],axis=0)
-            return tf.reduce_sum(tf.multiply(param_tensor, embedding), axis=0)
+def read_input(train_file_path, test_file_path):
+    # 无用特征
+    useless_cols = ['instance_id', 'user_id', 'context_id']
+
+    # 离散特征
+    discrete_cols = ['item_id', 'item_brand_id', 'item_city_id', 'item_price_level', 'item_sales_level',
+                     'item_collected_level', 'item_pv_level', 'user_gender_id', 'user_age_level',
+                     'user_occupation_id', 'user_star_level', 'context_page_id', 'shop_id',
+                     'shop_review_num_level', 'shop_star_level']
+
+    # 需要去长尾的特征
+    drop_long_tail_cols = ['item_id', 'item_brand_id', 'shop_id']
+
+    # 实值特征
+    real_value_cols = ['shop_review_positive_rate', 'shop_score_service',
+                       'shop_score_delivery', 'shop_score_description']
+
+    # 新建特征
+    create_cols = ['hour', 'week', 'category_join_first', 'category_join_second', 'category_join_third']
+
+    raw_train_data = pd.read_table(train_file_path, sep=' ')
+    raw_test_data = pd.read_table(test_file_path, sep=' ')
+    # 去掉完全一样的数据
+    raw_train_data.drop_duplicates(inplace=True)
+    # 去掉无用特征
+    test_instance_id = raw_test_data['instance_id']
+    raw_train_data.drop(useless_cols, axis=1, inplace=True)
+    raw_test_data.drop(useless_cols, axis=1, inplace=True)
+
+    # 生成离散特征
+    for col in discrete_cols:
+        raw_train_data[col] = raw_train_data[col].map(lambda x: col + '_' + str(x))
+        raw_test_data[col] = raw_test_data[col].map(lambda x: col + '_' + str(x))
+
+    # 获取predict_category与category_list的交集, 将category_list长度扩展到3, 不够用0补齐
+    extract_category_property(raw_train_data)
+    extract_category_property(raw_test_data)
+
+    # 将context_timestamp分解成weekday hour
+    maps = {'week': 0, 'hour': 1}
+    for j in maps:
+        raw_train_data[j] = raw_train_data['context_timestamp'].map(lambda x: j + '_' + get_day_hour(x)[maps[j]])
+        raw_test_data[j] = raw_test_data['context_timestamp'].map(lambda x: j + '_' + get_day_hour(x)[maps[j]])
+
+    # 去除context_timestamp和day
+
+    raw_train_data.drop(['context_timestamp'], axis=1, inplace=True)
+    raw_test_data.drop(['context_timestamp'], axis=1, inplace=True)
+
+    # 对于实数特征缺失值补均值
+    for k in real_value_cols:
+        mean = raw_train_data[k].mean()
+        raw_train_data[k].replace(-1, mean, inplace=True)
+        raw_test_data[k].replace(-1, mean, inplace=True)
+
+    # 特征统计
+    features = []
+    train_size = raw_train_data.shape[0]
+    for col in discrete_cols + create_cols:
+        series = raw_train_data[col].value_counts()
+        if col in drop_long_tail_cols:
+            features.extend(long_tail(series, size=train_size))
         else:
-            return None
+            features.extend(series.index.tolist())
 
-    return tf.map_fn(
-        lambda each: softmax_embedding(each), elems=indices, dtype=tf.float32)
+    features = [v for v in features if '_-1' not in v]
+    # 生成featmap
+    featmap = dict(zip(np.unique(features), range(1, len(features) + 1)))
 
+    train_real_value = raw_train_data[real_value_cols].applymap(lambda x: 0.1 * x)
+    # 训练数据feature to index mapping
+    train_discrete = raw_train_data[discrete_cols + create_cols].applymap(lambda x: featmap.get(x, 0))
+    train_labels = raw_train_data['is_trade']
 
-def build_vec(w, indices):
-    category = indices[1]
-    indices.pop(1)
-    property = indices[1]
-    indices.pop(1)
-    real_values = tf.Variable(tf.constant(np.array(indices[-4:]).reshape((4, 1))))
-    category_vec = _embedding(w, category, mode='softmax')
-    property_vec = _embedding(w, property)
-    discrete_vec = _embedding(w, indices, 'other')
-    return tf.concat([real_values, category_vec, property_vec, discrete_vec], axis=1)
+    test_real_value = raw_test_data[real_value_cols].applymap(lambda x: 0.1 * x)
+    # 测试数据feature to index mapping
+    test_discrete = raw_test_data[discrete_cols + create_cols].applymap(lambda x: featmap.get(x, 0))
+
+    return featmap, train_real_value.values, train_discrete.values, train_labels.values, \
+           test_real_value.values, test_discrete.values,test_instance_id.values
 
 
 if __name__ == '__main__':
-    path = 'data/train.txt'
-    train, valuate, test, featmap = input_data(path)
-    for i in featmap:
-        print(i, featmap[i])
-    for each in train.features()[0]:
-        print(each)
+    train_file_path = 'data/train.txt'
+    test_file_path = 'data/train.txt'
+    featmap, train_real_value, train_discrete, train_labels, \
+        test_real_value, test_discrete, test_instance_id = read_input(train_file_path,test_file_path)
+    print(len(featmap))

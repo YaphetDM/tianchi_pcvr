@@ -77,7 +77,7 @@ def long_tail(series, size, pct=0.99):
     return feature_list[:idx]
 
 
-def read_input(file_path, cond_day='2018-09-23'):
+def read_input(train_file_path, test_file_path, is_train=False, cond_day='2018-09-23'):
     # 无用特征
     useless_cols = ['instance_id', 'user_id', 'context_id']
 
@@ -97,47 +97,48 @@ def read_input(file_path, cond_day='2018-09-23'):
     # 新建特征
     create_cols = ['hour', 'week', 'category_join_first', 'category_join_second', 'category_join_third']
 
-    raw_data = pd.read_table(file_path, sep=' ')
+    raw_train_data = pd.read_table(train_file_path, sep=' ')
     # 去掉完全一样的数据
-    raw_data.drop_duplicates(inplace=True)
+    raw_train_data.drop_duplicates(inplace=True)
     # 去掉无用特征
-    raw_data.drop(useless_cols, axis=1, inplace=True)
+    raw_train_data.drop(useless_cols, axis=1, inplace=True)
 
     # 生成离散特征
     for col in discrete_cols:
-        raw_data[col] = raw_data[col].map(lambda x: col + '_' + str(x))
+        raw_train_data[col] = raw_train_data[col].map(lambda x: col + '_' + str(x))
 
     # 获取predict_category与category_list的交集, 将category_list长度扩展到3, 不够用0补齐
-    predict_category = raw_data['predict_category_property'].map(lambda x: [v.split(':')[0] for v in x.split(';')])
-    category_list = raw_data['item_category_list'].map(lambda x: x.split(';'))
+    predict_category = raw_train_data['predict_category_property'].map(
+        lambda x: [v.split(':')[0] for v in x.split(';')])
+    category_list = raw_train_data['item_category_list'].map(lambda x: x.split(';'))
     category_join = category_list.combine(predict_category, lambda x, y: merge(x, y)).map(
         lambda x: ['category_join_' + str(s) for s in x])
     category_join_first = category_join.map(lambda x: x[0])
     category_join_second = category_join.map(lambda x: x[1])
     category_join_third = category_join.map(lambda x: x[2])
-    raw_data['category_join_first'] = category_join_first
-    raw_data['category_join_second'] = category_join_second
-    raw_data['category_join_third'] = category_join_third
-    raw_data.drop(['predict_category_property', 'item_category_list', 'item_property_list'], axis=1, inplace=True)
+    raw_train_data['category_join_first'] = category_join_first
+    raw_train_data['category_join_second'] = category_join_second
+    raw_train_data['category_join_third'] = category_join_third
+    raw_train_data.drop(['predict_category_property', 'item_category_list', 'item_property_list'], axis=1, inplace=True)
 
     # 将context_timestamp分解成day weekday hour
     maps = {'day': 0, 'week': 1, 'hour': 2}
     for j in maps:
-        raw_data[j] = raw_data['context_timestamp'].map(lambda x: j + '_' + get_day_hour(x)[maps[j]])
+        raw_train_data[j] = raw_train_data['context_timestamp'].map(lambda x: j + '_' + get_day_hour(x)[maps[j]])
 
     # 构建训练数据和测试数据
-    train = raw_data.where(raw_data['day'] <= 'day_' + cond_day).dropna(axis=0)
-    test = raw_data.where(raw_data['day'] > 'day_' + cond_day).dropna(axis=0)
+    train = raw_train_data.where(raw_train_data['day'] <= 'day_' + cond_day).dropna(axis=0)
+    validate = raw_train_data.where(raw_train_data['day'] > 'day_' + cond_day).dropna(axis=0)
 
     # 去除context_timestamp和day
     train.drop(['context_timestamp', 'day'], axis=1, inplace=True)
-    test.drop(['context_timestamp', 'day'], axis=1, inplace=True)
+    validate.drop(['context_timestamp', 'day'], axis=1, inplace=True)
 
     # 对于实数特征缺失值补均值
     for k in real_value_cols:
         mean = train[k].mean()
         train[k].replace(-1, mean, inplace=True)
-        test[k].replace(-1, mean, inplace=True)
+        validate[k].replace(-1, mean, inplace=True)
 
     # 特征统计
     features = []
@@ -153,22 +154,22 @@ def read_input(file_path, cond_day='2018-09-23'):
     # 生成featmap
     featmap = dict(zip(np.unique(features), range(1, len(features) + 1)))
 
-    train_real_value = train[real_value_cols].applymap(lambda x: 0.1*x)
+    train_real_value = train[real_value_cols].applymap(lambda x: 0.1 * x)
     # 训练数据feature to index mapping
     train_discrete = train[discrete_cols + create_cols].applymap(lambda x: featmap.get(x, 0))
     train_labels = train['is_trade']
 
-    test_real_value = test[real_value_cols].applymap(lambda x: 0.1*x)
+    validate_real_value = validate[real_value_cols].applymap(lambda x: 0.1 * x)
     # 测试数据feature to index mapping
-    test_discrete = test[discrete_cols + create_cols].applymap(lambda x: featmap.get(x, 0))
-    test_labels = test['is_trade']
+    validate_discrete = validate[discrete_cols + create_cols].applymap(lambda x: featmap.get(x, 0))
+    validate_labels = validate['is_trade']
 
     return featmap, train_real_value.values, train_discrete.values, train_labels.values, \
-        test_real_value.values, test_discrete.values, test_labels.values
+        validate_real_value.values, validate_discrete.values, validate_labels.values
 
 
 if __name__ == '__main__':
     file_path = 'data/train.txt'
     featmap, train_real_value, train_discrete, train_labels, \
-        test_real_value, test_discrete, test_labels = read_input(file_path)
+        validate_real_value, validate_discrete, validate_labels = read_input(file_path)
     print(len(featmap))

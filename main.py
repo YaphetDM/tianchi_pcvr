@@ -1,5 +1,4 @@
 # coding:utf-8
-from xgboost_utils import read_input_as_df, add_dict
 import pandas as pd
 import numpy as np
 import xgboost as xgb
