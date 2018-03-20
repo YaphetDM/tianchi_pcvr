@@ -144,15 +144,16 @@ class DeepCrossNetwork(object):
         cross_network_out = CrossLayer(self.input_dim,
                                        self.cross_layer_num, self.cross_reg)(features)
         # self.hidden_size[-1]+ self.field_dim[0] + self.field_dim[1] * self.embedding_size
-        self.concat = Concatenate(axis=1, name='concat')([dense_network_out, cross_network_out])
+        concat = Concatenate(axis=1, name='concat')([dense_network_out, cross_network_out])
         output = Dense(1, activation='sigmoid',
                        kernel_initializer=keras.initializers.truncated_normal(stddev=self.init_std),
-                       kernel_regularizer=keras.regularizers.l2(self.output_reg))(self.concat)
-        return Model([self.real_value_input, self.discrete_input], [output])
+                       kernel_regularizer=keras.regularizers.l2(self.output_reg))(concat)
+        return Model([self.real_value_input, self.discrete_input], [output]), Model(
+            [self.real_value_input, self.discrete_input], [concat])
 
     def train(self, inputs, labels):
         print('dcn training step...')
-        self.model = self.build_model()
+        self.model = self.build_model()[0]
         self.model.compile(optimizer=keras.optimizers.Adam(self.lr),
                            loss=keras.losses.binary_crossentropy,
                            metrics=[keras.metrics.binary_crossentropy])
@@ -164,17 +165,19 @@ class DeepCrossNetwork(object):
         print('dcn evaluation loss ', cross_entropy)
 
     def get_concat(self, inputs):
-        model = self.build_model()
-        return model.predict(inputs, batch_size=self.batch_size * 2)
+        concat_model = self.build_model()[1]
+        return concat_model.predict(inputs, batch_size=self.batch_size * 2)
 
-    def xgb_train_with_concat(self, features, labels, params):
+    def xgb_train_with_concat(self, features, labels, num_boost_round=100, params=None):
         print('xgb training...')
         dtrain = xgb.DMatrix(self.get_concat(features), labels)
-        self.xgb_model = xgb.train(dtrain=dtrain, num_boost_round=50, params=params)
+        print('num rows', dtrain.num_row())
+        print('num columns', dtrain.num_col())
+        self.xgb_model = xgb.train(dtrain=dtrain, num_boost_round=num_boost_round, params=params)
 
     def xgb_predict(self, features):
         dtest = xgb.DMatrix(self.get_concat(features))
-        return self.xgb_model.predict(dtest)
+        return self.xgb_model.predict(dtest, ntree_limit=self.xgb_model.best_ntree_limit)
 
     def xgc_logloss(self, features, labels):
         predictions = self.xgb_predict(features)
@@ -184,13 +187,15 @@ class DeepCrossNetwork(object):
 if __name__ == '__main__':
     params = {'booster': 'gbtree',
               'objective': 'binary:logistic',
+              'early_stopping_rounds': 50,
               'eval_metric': 'logloss',
               'max_depth': 3,
-              'lambda': 10,
+              'lambda': 200,
+              'gamma': 0.05,
               'subsample': 0.75,
               'colsample_bytree': 0.75,
-              'min_child_weight': 2,
-              'eta': 0.15,
+              'min_child_weight': 3,
+              'eta': 0.05,
               'seed': 1024,
               'nthread': 8,
               'silent': 1}
@@ -199,6 +204,7 @@ if __name__ == '__main__':
     output_file_path = '../data/output.txt'
     is_train = True
     drop_pct = 0.95
+    num_iterations = 1000
     if is_train:
         featmap, train_real_value, train_discrete, train_labels, \
         valid_real_value, valid_discrete, valid_labels = read_input(train_file_path, test_file_path=None,
@@ -208,8 +214,9 @@ if __name__ == '__main__':
         dcn = DeepCrossNetwork([4, 20], features_len, 8, 256, 4, [32, 32], 0.1, 1024,
                                1e-2, 1e-2, 1e-2, 1e-2, 5e-4, 2, 0.4)
         dcn.train([train_real_value, train_discrete], train_labels)
+        dcn.model.summary()
         dcn.evaluate_dcn([train_real_value, train_discrete], train_labels)
-        dcn.xgb_train_with_concat([train_real_value, train_discrete], train_labels, params)
+        dcn.xgb_train_with_concat([train_real_value, train_discrete], train_labels, num_iterations, params)
         dcn.xgc_logloss([valid_real_value, valid_discrete], valid_labels)
     else:
         featmap, train_real_value, train_discrete, train_labels, \
@@ -220,7 +227,7 @@ if __name__ == '__main__':
         dcn = DeepCrossNetwork([4, 20], features_len, 8, 256, 4, [32, 32], 0.1, 1024,
                                1e-2, 1e-2, 1e-2, 1e-2, 5e-4, 2, 0.4)
         dcn.train([train_real_value, train_discrete], train_labels)
-        dcn.xgb_train_with_concat([train_real_value, train_discrete], train_labels, params)
+        dcn.xgb_train_with_concat([train_real_value, train_discrete], train_labels, num_iterations, params)
         predictions = dcn.xgb_predict([test_real_value, test_discrete])
         with open(output_file_path, 'w') as f:
             f.write('instance_id\tscore\n')
