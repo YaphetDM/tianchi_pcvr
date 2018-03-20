@@ -45,7 +45,7 @@ def get_day_hour(value, time_format='%Y-%m-%d-%H'):
     format_time = time.strftime(time_format, value)
     year, month, day, hour = format_time.split('-')
     dt = datetime(year=int(year), month=int(month), day=int(day))
-    return str(dt.weekday()), hour
+    return int(day), str(dt.weekday()), hour
 
 
 def merge(x, y):
@@ -65,7 +65,7 @@ def merge(x, y):
         return [0, 0, 0]
 
 
-def long_tail(series, size, pct=0.99):
+def long_tail(series, size, pct=0.95):
     idx = 0
     cnt = 0
     threshold = int(size * pct)
@@ -91,7 +91,29 @@ def extract_category_property(df):
     df.drop(['predict_category_property', 'item_category_list', 'item_property_list'], axis=1, inplace=True)
 
 
-def read_input(train_file_path, test_file_path):
+def extract_user_query(data):
+    data['time'] = data['context_timestamp'].apply(get_day_hour)
+
+    data['day'] = data.time.apply(lambda x: x[0])
+    data['week'] = data.time.apply(lambda x: x[1])
+    data['hour'] = data.time.apply(lambda x: x[2])
+    # user_query_day = data.groupby(['user_id', 'day']).size(
+    # ).reset_index().rename(columns={0: 'user_query_day'})
+    # data = pd.merge(data, user_query_day, 'left', on=['user_id', 'day'])
+    user_query_day_hour = data.groupby(['user_id', 'day', 'hour']).size().reset_index().rename(
+        columns={0: 'user_query_day_hour'})
+    data = pd.merge(data, user_query_day_hour, 'left',
+                    on=['user_id', 'day', 'hour'])
+
+    user_query_week = data.groupby(['user_id', 'week']).size().reset_index().rename(
+        columns={0: 'user_query_week'})
+    data = pd.merge(data, user_query_week, 'left',
+                    on=['user_id', 'week'])
+    data.drop(['context_timestamp', 'user_id', 'time'], axis=1, inplace=True)
+    return data
+
+
+def read_input(train_file_path, test_file_path, is_train=True):
     # 无用特征
     useless_cols = ['instance_id', 'user_id', 'context_id']
 
@@ -112,70 +134,96 @@ def read_input(train_file_path, test_file_path):
     create_cols = ['hour', 'week', 'category_join_first', 'category_join_second', 'category_join_third']
 
     raw_train_data = pd.read_table(train_file_path, sep=' ')
-    raw_test_data = pd.read_table(test_file_path, sep=' ')
+
     # 去掉完全一样的数据
     raw_train_data.drop_duplicates(inplace=True)
     # 去掉无用特征
-    test_instance_id = raw_test_data['instance_id']
+
     raw_train_data.drop(useless_cols, axis=1, inplace=True)
-    raw_test_data.drop(useless_cols, axis=1, inplace=True)
 
     # 生成离散特征
     for col in discrete_cols:
         raw_train_data[col] = raw_train_data[col].map(lambda x: col + '_' + str(x))
-        raw_test_data[col] = raw_test_data[col].map(lambda x: col + '_' + str(x))
-
     # 获取predict_category与category_list的交集, 将category_list长度扩展到3, 不够用0补齐
     extract_category_property(raw_train_data)
-    extract_category_property(raw_test_data)
+    # raw_train_data = extract_user_query(raw_train_data)
 
-    # 将context_timestamp分解成weekday hour
-    maps = {'week': 0, 'hour': 1}
-    for j in maps:
-        raw_train_data[j] = raw_train_data['context_timestamp'].map(lambda x: j + '_' + get_day_hour(x)[maps[j]])
-        raw_test_data[j] = raw_test_data['context_timestamp'].map(lambda x: j + '_' + get_day_hour(x)[maps[j]])
+    if is_train:
+        train = raw_train_data.loc[raw_train_data.day < 24]
+        validate = raw_train_data.loc[raw_train_data.day == 24]
+        # 对于实数特征缺失值补均值
+        for k in real_value_cols:
+            mean = train[k].mean()
+            train[k].replace(-1, mean, inplace=True)
+            validate[k].replace(-1, mean, inplace=True)
 
-    # 去除context_timestamp和day
+        # 特征统计
+        features = []
+        train_size = train.shape[0]
+        for col in discrete_cols + create_cols:
+            series = train[col].value_counts()
+            if col in drop_long_tail_cols:
+                features.extend(long_tail(series, size=train_size))
+            else:
+                features.extend(series.index.tolist())
 
-    raw_train_data.drop(['context_timestamp'], axis=1, inplace=True)
-    raw_test_data.drop(['context_timestamp'], axis=1, inplace=True)
+        features = [v for v in features if '_-1' not in v]
+        # 生成featmap
+        featmap = dict(zip(np.unique(features), range(1, len(features) + 1)))
 
-    # 对于实数特征缺失值补均值
-    for k in real_value_cols:
-        mean = raw_train_data[k].mean()
-        raw_train_data[k].replace(-1, mean, inplace=True)
-        raw_test_data[k].replace(-1, mean, inplace=True)
+        train_real_value = train[real_value_cols].applymap(lambda x: 0.1 * x)
+        # 训练数据feature to index mapping
+        train_discrete = train[discrete_cols + create_cols].applymap(lambda x: featmap.get(x, 0))
+        train_labels = train['is_trade']
 
-    # 特征统计
-    features = []
-    train_size = raw_train_data.shape[0]
-    for col in discrete_cols + create_cols:
-        series = raw_train_data[col].value_counts()
-        if col in drop_long_tail_cols:
-            features.extend(long_tail(series, size=train_size))
-        else:
-            features.extend(series.index.tolist())
+        validate_real_value = validate[real_value_cols].applymap(lambda x: 0.1 * x)
+        # 测试数据feature to index mapping
+        validate_discrete = validate[discrete_cols + create_cols].applymap(lambda x: featmap.get(x, 0))
+        validate_labels = validate['is_trade']
+        # return featmap, train_real_value.values, train_discrete.values, train_labels.values, \
+        #        validate_real_value.values, validate_discrete.values, validate_labels.values
+        return train_discrete
+    else:
+        raw_test_data = pd.read_table(test_file_path, sep=' ')
+        extract_category_property(raw_test_data)
+        # raw_test_data = extract_user_query(raw_test_data)
+        test_instance_id = raw_test_data['instance_id']
+        raw_test_data.drop(useless_cols, axis=1, inplace=True)
+        for k in real_value_cols:
+            mean = raw_train_data[k].mean()
+            raw_train_data[k].replace(-1, mean, inplace=True)
+            raw_test_data[k].replace(-1, mean, inplace=True)
 
-    features = [v for v in features if '_-1' not in v]
-    # 生成featmap
-    featmap = dict(zip(np.unique(features), range(1, len(features) + 1)))
+        features = []
+        train_size = raw_train_data.shape[0]
+        for col in discrete_cols + create_cols:
+            series = raw_train_data[col].value_counts()
+            if col in drop_long_tail_cols:
+                features.extend(long_tail(series, size=train_size))
+            else:
+                features.extend(series.index.tolist())
 
-    train_real_value = raw_train_data[real_value_cols].applymap(lambda x: 0.1 * x)
-    # 训练数据feature to index mapping
-    train_discrete = raw_train_data[discrete_cols + create_cols].applymap(lambda x: featmap.get(x, 0))
-    train_labels = raw_train_data['is_trade']
+        features = [v for v in features if '_-1' not in v]
+        # 生成featmap
+        featmap = dict(zip(np.unique(features), range(1, len(features) + 1)))
 
-    test_real_value = raw_test_data[real_value_cols].applymap(lambda x: 0.1 * x)
-    # 测试数据feature to index mapping
-    test_discrete = raw_test_data[discrete_cols + create_cols].applymap(lambda x: featmap.get(x, 0))
+        train_real_value = raw_train_data[real_value_cols].applymap(lambda x: 0.1 * x)
+        # 训练数据feature to index mapping
+        train_discrete = raw_train_data[discrete_cols + create_cols].applymap(lambda x: featmap.get(x, 0))
+        train_labels = raw_train_data['is_trade']
 
-    return featmap, train_real_value.values, train_discrete.values, train_labels.values, \
-           test_real_value.values, test_discrete.values,test_instance_id.values
+        test_real_value = raw_test_data[real_value_cols].applymap(lambda x: 0.1 * x)
+        test_discrete = raw_test_data[discrete_cols + create_cols].applymap(lambda x: featmap.get(x, 0))
+        return train_real_value.values, train_discrete.values, train_labels.values, test_real_value.values, \
+               test_discrete.values, test_instance_id.values
 
 
 if __name__ == '__main__':
     train_file_path = 'data/train.txt'
     test_file_path = 'data/train.txt'
-    featmap, train_real_value, train_discrete, train_labels, \
-        test_real_value, test_discrete, test_instance_id = read_input(train_file_path,test_file_path)
-    print(len(featmap))
+    output_file_path = '../data/output.txt'
+    # featmap, train_real_value, train_discrete, train_labels, \
+    # test_real_value, test_discrete, test_instance_id = read_input(train_file_path, test_file_path)
+    train_discrete = read_input(train_file_path, test_file_path)
+    for each in train_discrete.columns.tolist():
+        print(each)

@@ -14,6 +14,7 @@ from keras.backend.tensorflow_backend import set_session
 import tensorflow as tf
 import xgboost as xgb
 from sklearn.metrics import auc
+from sklearn.metrics import log_loss
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"  # see issue #152
 os.environ["CUDA_VISIBLE_DEVICES"] = '0'
@@ -178,6 +179,8 @@ class DeepCrossNetwork(object):
         return self.xgb_model.predict(dtest)
 
 
+
+
 if __name__ == '__main__':
     params = {'booster': 'gbtree',
               'objective': 'binary:logistic',
@@ -196,14 +199,15 @@ if __name__ == '__main__':
     output_file_path = '../data/output.txt'
     featmap, train_real_value, train_discrete, train_labels, \
     test_real_value, test_discrete, test_instance_id = read_input(train_file_path, test_file_path)
-    features_len = len(featmap)
-    print('features length: ', features_len)
-    dcn = DeepCrossNetwork([4, 20], features_len, 8, 256, 4, [32, 32], 0.1, 1024, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3, 1, 0.4)
-    dcn.train([train_real_value, train_discrete], train_labels)
-    dcn.xgb_train_with_concat([train_real_value, train_discrete], train_labels, params)
-    predictions = dcn.xgb_predict([test_real_value, test_discrete])
-    with open(output_file_path, 'w') as f:
-        f.write('instance_id \t score')
-        for id, score in zip(test_instance_id, predictions):
-            print(id, score)
-            f.write(str(id) + '\t' + str(score) + '\n')
+    print(train_discrete[:2])
+    # features_len = len(featmap)
+    # print('features length: ', features_len)
+    # dcn = DeepCrossNetwork([4, 20], features_len, 8, 256, 4, [32, 32], 0.1, 1024, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3, 1, 0.4)
+    # dcn.train([train_real_value, train_discrete], train_labels)
+    # dcn.xgb_train_with_concat([train_real_value, train_discrete], train_labels, params)
+    # predictions = dcn.xgb_predict([test_real_value, test_discrete])
+    # with open(output_file_path, 'w') as f:
+    #     f.write('instance_id \t score')
+    #     for id, score in zip(test_instance_id, predictions):
+    #         print(id, score)
+    #         f.write(str(id) + '\t' + str(score) + '\n')
