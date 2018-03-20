@@ -146,20 +146,23 @@ def read_input(train_file_path, test_file_path, is_train=True, drop_pct=0.95):
         raw_train_data[col] = raw_train_data[col].map(lambda x: col + '_' + str(x))
     # 获取predict_category与category_list的交集, 将category_list长度扩展到3, 不够用0补齐
     extract_category_property(raw_train_data)
-    raw_train_data['time'] = raw_train_data['context_timestamp'].apply(get_day_hour)
-    raw_train_data['day'] = raw_train_data.time.apply(lambda x: x[0])
-    raw_train_data['week'] = raw_train_data.time.apply(lambda x: 'week_' + str(x[1]))
-    raw_train_data['hour'] = raw_train_data.time.apply(lambda x: 'hour_' + str(x[2]))
+    # raw_train_data = extract_user_query(raw_train_data)
 
     if is_train:
+        raw_train_data['time'] = raw_train_data['context_timestamp'].apply(get_day_hour)
+
+        raw_train_data['day'] = raw_train_data.time.apply(lambda x: x[0])
+        raw_train_data['week'] = raw_train_data.time.apply(lambda x: x[1])
+        raw_train_data['hour'] = raw_train_data.time.apply(lambda x: x[2])
         train = raw_train_data.loc[raw_train_data.day < 24]
         validate = raw_train_data.loc[raw_train_data.day == 24]
-        # raw_train_data.drop(['day', 'time', 'context_timestamp'], axis=1, inplace=True)
+        raw_train_data.drop(['day', 'time'], axis=1, inplace=True)
         # 对于实数特征缺失值补均值
         for k in real_value_cols:
             mean = train[k].mean()
             train[k].replace(-1, mean, inplace=True)
             validate[k].replace(-1, mean, inplace=True)
+
         # 特征统计
         features = []
         train_size = train.shape[0]
@@ -177,7 +180,6 @@ def read_input(train_file_path, test_file_path, is_train=True, drop_pct=0.95):
         train_real_value = train[real_value_cols].applymap(lambda x: 0.1 * x)
         # 训练数据feature to index mapping
         train_discrete = train[discrete_cols + create_cols].applymap(lambda x: featmap.get(x, 0))
-        # train_discrete = train[discrete_cols + create_cols]
         train_labels = train['is_trade']
 
         validate_real_value = validate[real_value_cols].applymap(lambda x: 0.1 * x)
@@ -186,23 +188,17 @@ def read_input(train_file_path, test_file_path, is_train=True, drop_pct=0.95):
         validate_labels = validate['is_trade']
         return featmap, train_real_value.values, train_discrete.values, train_labels.values, \
                validate_real_value.values, validate_discrete.values, validate_labels.values
+        # return train_discrete
     else:
         raw_test_data = pd.read_table(test_file_path, sep=' ')
         extract_category_property(raw_test_data)
-        raw_test_data['time'] = raw_test_data['context_timestamp'].apply(get_day_hour)
-        raw_test_data['week'] = raw_test_data.time.apply(lambda x: 'week_' + str(x[1]))
-        raw_test_data['hour'] = raw_test_data.time.apply(lambda x: 'hour_' + str(x[2]))
+        # raw_test_data = extract_user_query(raw_test_data)
         test_instance_id = raw_test_data['instance_id']
-        train_labels = raw_train_data['is_trade']
-        raw_test_data.drop(useless_cols + ['time', 'context_timestamp', 'is_trade'], axis=1, inplace=True)
-
+        raw_test_data.drop(useless_cols, axis=1, inplace=True)
         for k in real_value_cols:
             mean = raw_train_data[k].mean()
             raw_train_data[k].replace(-1, mean, inplace=True)
             raw_test_data[k].replace(-1, mean, inplace=True)
-
-        for col in discrete_cols:
-            raw_test_data[col] = raw_test_data[col].map(lambda x: col + '_' + str(x))
 
         features = []
         train_size = raw_train_data.shape[0]
@@ -220,19 +216,19 @@ def read_input(train_file_path, test_file_path, is_train=True, drop_pct=0.95):
         train_real_value = raw_train_data[real_value_cols].applymap(lambda x: 0.1 * x)
         # 训练数据feature to index mapping
         train_discrete = raw_train_data[discrete_cols + create_cols].applymap(lambda x: featmap.get(x, 0))
+        train_labels = raw_train_data['is_trade']
 
         test_real_value = raw_test_data[real_value_cols].applymap(lambda x: 0.1 * x)
         test_discrete = raw_test_data[discrete_cols + create_cols].applymap(lambda x: featmap.get(x, 0))
-
-        return featmap, train_real_value.values, train_discrete.values, train_labels.values, test_real_value.values, \
+        return train_real_value.values, train_discrete.values, train_labels.values, test_real_value.values, \
                test_discrete.values, test_instance_id.values
 
 
 if __name__ == '__main__':
     train_file_path = 'data/train.txt'
     test_file_path = 'data/train.txt'
-    featmap, train_real_value, train_discrete, train_labels, \
-    test_real_value, test_discrete, test_instance_id = read_input(train_file_path, test_file_path)
-    # train_discrete = read_input(train_file_path, test_file_path)
-    for i in train_discrete[0]:
-        print(i)
+    # featmap, train_real_value, train_discrete, train_labels, \
+    # test_real_value, test_discrete, test_instance_id = read_input(train_file_path, test_file_path)
+    train_discrete = read_input(train_file_path, test_file_path)
+    for each in train_discrete.columns.tolist():
+        print(each)
