@@ -1,22 +1,21 @@
 # coding:utf-8
 
-# coding:utf-8
-
+import os
 import keras
+import numpy as np
+import tensorflow as tf
+import xgboost as xgb
 from keras import backend as K
+from keras.backend.tensorflow_backend import set_session
 from keras.layers import Input, Reshape, Embedding, Concatenate, Add, Lambda, Flatten, Dense, Dropout
 from keras.layers import Layer
 from keras.models import Model
-import numpy as np
-from utils import read_input
-import os
-from keras.backend.tensorflow_backend import set_session
-import tensorflow as tf
-import xgboost as xgb
 from sklearn.metrics import auc
 from sklearn.metrics import log_loss
 
-os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"  # see issue #152
+from utils import read_input
+
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 config = tf.ConfigProto()
 config.gpu_options.per_process_gpu_memory_fraction = 0.5
@@ -42,7 +41,6 @@ class CrossLayer(Layer):
                                 trainable=True))
             self.bias.append(
                 self.add_weight(shape=[1, self.input_dim], initializer='zeros', name='b_' + str(i), trainable=True))
-        # super(CrossLayer, self).build(input_shape)
         self.built = True
 
     def call(self, inputs, **kwargs):
@@ -122,11 +120,11 @@ class DeepCrossNetwork(object):
         return TP / P
 
     def auc(self, y_true, y_pred):
-        ptas = tf.stack([self.binary_PTA(y_true, y_pred, k) for k in np.linspace(0, 1, 1000)], axis=0)
-        pfas = tf.stack([self.binary_PFA(y_true, y_pred, k) for k in np.linspace(0, 1, 1000)], axis=0)
-        pfas = tf.concat([tf.ones((1,)), pfas], axis=0)
-        binSizes = -(pfas[1:] - pfas[:-1])
-        s = ptas * binSizes
+        p_tas = tf.stack([self.binary_PTA(y_true, y_pred, k) for k in np.linspace(0, 1, 1000)], axis=0)
+        p_fas = tf.stack([self.binary_PFA(y_true, y_pred, k) for k in np.linspace(0, 1, 1000)], axis=0)
+        p_fas = tf.concat([tf.ones((1,)), p_fas], axis=0)
+        bin_size = -(p_fas[1:] - p_fas[:-1])
+        s = p_tas * bin_size
         return K.sum(s, axis=0)
 
     def xgb_auc(self, inputs, labels):
@@ -157,7 +155,7 @@ class DeepCrossNetwork(object):
         self.model = self.build_model()
         self.model.compile(optimizer=keras.optimizers.Adam(self.lr),
                            loss=keras.losses.binary_crossentropy,
-                           metrics=[keras.metrics.binary_crossentropy, self.auc])
+                           metrics=[keras.metrics.binary_crossentropy])
         self.model.fit(inputs, labels, batch_size=self.batch_size, epochs=self.epoch)
 
     def evaluate_dcn(self, inputs, labels):
@@ -178,7 +176,9 @@ class DeepCrossNetwork(object):
         dtest = xgb.DMatrix(self.get_concat(features))
         return self.xgb_model.predict(dtest)
 
-
+    def xgc_logloss(self, features, labels):
+        predictions = self.xgb_predict(features)
+        return log_loss(labels, predictions)
 
 
 if __name__ == '__main__':
@@ -186,7 +186,7 @@ if __name__ == '__main__':
               'objective': 'binary:logistic',
               'eval_metric': 'logloss',
               'max_depth': 3,
-              'alpha': 2,
+              'lambda': 10,
               'subsample': 0.75,
               'colsample_bytree': 0.75,
               'min_child_weight': 2,
@@ -197,17 +197,33 @@ if __name__ == '__main__':
     train_file_path = '../data/train.txt'
     test_file_path = '../data/train.txt'
     output_file_path = '../data/output.txt'
-    featmap, train_real_value, train_discrete, train_labels, \
-    test_real_value, test_discrete, test_instance_id = read_input(train_file_path, test_file_path)
-    print(train_discrete[:2])
-    # features_len = len(featmap)
-    # print('features length: ', features_len)
-    # dcn = DeepCrossNetwork([4, 20], features_len, 8, 256, 4, [32, 32], 0.1, 1024, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3, 1, 0.4)
-    # dcn.train([train_real_value, train_discrete], train_labels)
-    # dcn.xgb_train_with_concat([train_real_value, train_discrete], train_labels, params)
-    # predictions = dcn.xgb_predict([test_real_value, test_discrete])
-    # with open(output_file_path, 'w') as f:
-    #     f.write('instance_id \t score')
-    #     for id, score in zip(test_instance_id, predictions):
-    #         print(id, score)
-    #         f.write(str(id) + '\t' + str(score) + '\n')
+    is_train = True
+    drop_pct = 0.95
+    if is_train:
+        featmap, train_real_value, train_discrete, train_labels, \
+        valid_real_value, valid_discrete, valid_labels = read_input(train_file_path, test_file_path=None,
+                                                                    is_train=is_train, drop_pct=drop_pct)
+        features_len = len(featmap)
+        print('features length: ', features_len)
+        dcn = DeepCrossNetwork([4, 20], features_len, 8, 256, 4, [32, 32], 0.1, 1024,
+                               1e-2, 1e-2, 1e-2, 1e-2, 5e-4, 2, 0.4)
+        dcn.train([train_real_value, train_discrete], train_labels)
+        dcn.evaluate_dcn([train_real_value, train_discrete], train_labels)
+        dcn.xgb_train_with_concat([train_real_value, train_discrete], train_labels, params)
+        dcn.xgc_logloss([valid_real_value, valid_discrete], valid_labels)
+    else:
+        featmap, train_real_value, train_discrete, train_labels, \
+        test_real_value, test_discrete, test_instance_id = read_input(train_file_path, test_file_path=test_file_path,
+                                                                      is_train=False, drop_pct=drop_pct)
+        features_len = len(featmap)
+        print('features length: ', features_len)
+        dcn = DeepCrossNetwork([4, 20], features_len, 8, 256, 4, [32, 32], 0.1, 1024,
+                               1e-2, 1e-2, 1e-2, 1e-2, 5e-4, 2, 0.4)
+        dcn.train([train_real_value, train_discrete], train_labels)
+        dcn.xgb_train_with_concat([train_real_value, train_discrete], train_labels, params)
+        predictions = dcn.xgb_predict([test_real_value, test_discrete])
+        with open(output_file_path, 'w') as f:
+            f.write('instance_id\tscore\n')
+            for id, score in zip(test_instance_id, predictions):
+                print(id, score)
+                f.write(str(id) + '\t' + str(score) + '\n')

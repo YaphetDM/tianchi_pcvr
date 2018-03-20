@@ -113,7 +113,7 @@ def extract_user_query(data):
     return data
 
 
-def read_input(train_file_path, test_file_path, is_train=True):
+def read_input(train_file_path, test_file_path, is_train=True, drop_pct=0.95):
     # 无用特征
     useless_cols = ['instance_id', 'user_id', 'context_id']
 
@@ -149,8 +149,14 @@ def read_input(train_file_path, test_file_path, is_train=True):
     # raw_train_data = extract_user_query(raw_train_data)
 
     if is_train:
+        raw_train_data['time'] = raw_train_data['context_timestamp'].apply(get_day_hour)
+
+        raw_train_data['day'] = raw_train_data.time.apply(lambda x: x[0])
+        raw_train_data['week'] = raw_train_data.time.apply(lambda x: x[1])
+        raw_train_data['hour'] = raw_train_data.time.apply(lambda x: x[2])
         train = raw_train_data.loc[raw_train_data.day < 24]
         validate = raw_train_data.loc[raw_train_data.day == 24]
+        raw_train_data.drop(['day', 'time'], axis=1, inplace=True)
         # 对于实数特征缺失值补均值
         for k in real_value_cols:
             mean = train[k].mean()
@@ -163,7 +169,7 @@ def read_input(train_file_path, test_file_path, is_train=True):
         for col in discrete_cols + create_cols:
             series = train[col].value_counts()
             if col in drop_long_tail_cols:
-                features.extend(long_tail(series, size=train_size))
+                features.extend(long_tail(series, size=train_size, pct=drop_pct))
             else:
                 features.extend(series.index.tolist())
 
@@ -180,9 +186,9 @@ def read_input(train_file_path, test_file_path, is_train=True):
         # 测试数据feature to index mapping
         validate_discrete = validate[discrete_cols + create_cols].applymap(lambda x: featmap.get(x, 0))
         validate_labels = validate['is_trade']
-        # return featmap, train_real_value.values, train_discrete.values, train_labels.values, \
-        #        validate_real_value.values, validate_discrete.values, validate_labels.values
-        return train_discrete
+        return featmap, train_real_value.values, train_discrete.values, train_labels.values, \
+               validate_real_value.values, validate_discrete.values, validate_labels.values
+        # return train_discrete
     else:
         raw_test_data = pd.read_table(test_file_path, sep=' ')
         extract_category_property(raw_test_data)
@@ -199,7 +205,7 @@ def read_input(train_file_path, test_file_path, is_train=True):
         for col in discrete_cols + create_cols:
             series = raw_train_data[col].value_counts()
             if col in drop_long_tail_cols:
-                features.extend(long_tail(series, size=train_size))
+                features.extend(long_tail(series, size=train_size, pct=drop_pct))
             else:
                 features.extend(series.index.tolist())
 
@@ -221,7 +227,6 @@ def read_input(train_file_path, test_file_path, is_train=True):
 if __name__ == '__main__':
     train_file_path = 'data/train.txt'
     test_file_path = 'data/train.txt'
-    output_file_path = '../data/output.txt'
     # featmap, train_real_value, train_discrete, train_labels, \
     # test_real_value, test_discrete, test_instance_id = read_input(train_file_path, test_file_path)
     train_discrete = read_input(train_file_path, test_file_path)
