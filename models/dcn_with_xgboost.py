@@ -141,8 +141,7 @@ class DeepCrossNetwork(object):
         features = Concatenate(axis=1)([self.real_value_input, reshape])
         dense_network_out = Lambda(self.dense_loop)(features)
 
-        cross_network_out = CrossLayer(self.input_dim,
-                                       self.cross_layer_num, self.cross_reg)(features)
+        cross_network_out = CrossLayer(self.input_dim, self.cross_layer_num, self.cross_reg)(features)
         # self.hidden_size[-1]+ self.field_dim[0] + self.field_dim[1] * self.embedding_size
         concat = Concatenate(axis=1, name='concat')([dense_network_out, cross_network_out])
         output = Dense(1, activation='sigmoid',
