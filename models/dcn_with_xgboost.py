@@ -18,7 +18,7 @@ from utils import read_input
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 config = tf.ConfigProto()
-config.gpu_options.per_process_gpu_memory_fraction = 0.5
+config.gpu_options.per_process_gpu_memory_fraction = 0.6
 set_session(tf.Session(config=config))
 
 
@@ -178,7 +178,7 @@ class DeepCrossNetwork(object):
         dtest = xgb.DMatrix(self.get_concat(features))
         return self.xgb_model.predict(dtest, ntree_limit=self.xgb_model.best_ntree_limit)
 
-    def xgc_logloss(self, features, labels):
+    def xgb_logloss(self, features, labels):
         predictions = self.xgb_predict(features)
         return log_loss(labels, predictions)
 
@@ -188,19 +188,19 @@ if __name__ == '__main__':
               'objective': 'binary:logistic',
               'early_stopping_rounds': 50,
               'eval_metric': 'logloss',
-              'max_depth': 3,
-              'lambda': 200,
+              'max_depth': 6,
+              'lambda': 500,
               'gamma': 0.05,
               'subsample': 0.75,
               'colsample_bytree': 0.75,
               'min_child_weight': 3,
-              'eta': 0.05,
+              'eta': 0.1,
               'seed': 1024,
-              'nthread': 8,
+              'nthread': 12,
               'silent': 1}
-    train_file_path = '../data/train.txt'
-    test_file_path = '../data/train.txt'
-    output_file_path = '../data/output.txt'
+    train_file_path = 'data/train'
+    test_file_path = 'data/test'
+    output_file_path = 'output.txt'
     is_train = True
     drop_pct = 0.95
     num_iterations = 1000
@@ -210,13 +210,13 @@ if __name__ == '__main__':
                                                                     is_train=is_train, drop_pct=drop_pct)
         features_len = len(featmap)
         print('features length: ', features_len)
-        dcn = DeepCrossNetwork([4, 20], features_len, 8, 256, 4, [32, 32], 0.1, 1024,
-                               1e-2, 1e-2, 1e-2, 1e-2, 5e-4, 2, 0.4)
+        dcn = DeepCrossNetwork([4, 20], features_len, 16, 1024, 4, [16, 16], 0.1, 1024,
+                               5e-3, 5e-3, 5e-3, 5e-3, 5e-4, 2, 0.4)
         dcn.train([train_real_value, train_discrete], train_labels)
         dcn.model.summary()
-        dcn.evaluate_dcn([train_real_value, train_discrete], train_labels)
+        dcn.evaluate_dcn([valid_real_value, valid_real_value], train_labels)
         dcn.xgb_train_with_concat([train_real_value, train_discrete], train_labels, num_iterations, params)
-        dcn.xgc_logloss([valid_real_value, valid_discrete], valid_labels)
+        dcn.xgb_logloss([valid_real_value, valid_discrete], valid_labels)
     else:
         featmap, train_real_value, train_discrete, train_labels, \
         test_real_value, test_discrete, test_instance_id = read_input(train_file_path, test_file_path=test_file_path,

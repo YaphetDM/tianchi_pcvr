@@ -220,15 +220,14 @@ def read_input(train_file_path, test_file_path, is_train=True, drop_pct=0.95):
 
         test_real_value = raw_test_data[real_value_cols].applymap(lambda x: 0.1 * x)
         test_discrete = raw_test_data[discrete_cols + create_cols].applymap(lambda x: featmap.get(x, 0))
-        return train_real_value.values, train_discrete.values, train_labels.values, test_real_value.values, \
-               test_discrete.values, test_instance_id.values
+        return featmap, train_real_value.values, train_discrete.values, train_labels.values, \
+               test_real_value.values, test_discrete.values, test_instance_id.values
 
 
 if __name__ == '__main__':
     train_file_path = 'data/train.txt'
     test_file_path = 'data/train.txt'
-    # featmap, train_real_value, train_discrete, train_labels, \
-    # test_real_value, test_discrete, test_instance_id = read_input(train_file_path, test_file_path)
-    train_discrete = read_input(train_file_path, test_file_path)
+    featmap, train_real_value, train_discrete, train_labels, \
+    test_real_value, test_discrete, test_instance_id = read_input(train_file_path, test_file_path)
     for each in train_discrete.columns.tolist():
         print(each)
