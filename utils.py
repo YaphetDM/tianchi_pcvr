@@ -156,7 +156,6 @@ def read_input(train_file_path, test_file_path, is_train=True, drop_pct=0.95):
         raw_train_data['hour'] = raw_train_data.time.apply(lambda x: x[2])
         train = raw_train_data.loc[raw_train_data.day < 24]
         validate = raw_train_data.loc[raw_train_data.day == 24]
-        raw_train_data.drop(['day', 'time'], axis=1, inplace=True)
         # 对于实数特征缺失值补均值
         for k in real_value_cols:
             mean = train[k].mean()
@@ -193,8 +192,13 @@ def read_input(train_file_path, test_file_path, is_train=True, drop_pct=0.95):
         raw_test_data = pd.read_table(test_file_path, sep=' ')
         extract_category_property(raw_test_data)
         # raw_test_data = extract_user_query(raw_test_data)
-        test_instance_id = raw_test_data['instance_id']
-        raw_test_data.drop(useless_cols, axis=1, inplace=True)
+        raw_test_data['time'] = raw_test_data['context_timestamp'].apply(get_day_hour)
+        raw_test_data['week'] = raw_test_data.time.apply(lambda x: 'week_' + str(x[1]))
+        raw_test_data['hour'] = raw_test_data.time.apply(lambda x: 'hour_' + str(x[2]))
+        # 生成离散特征
+        for col in discrete_cols:
+            raw_test_data[col] = raw_test_data[col].map(lambda x: col + '_' + str(x))
+
         for k in real_value_cols:
             mean = raw_train_data[k].mean()
             raw_train_data[k].replace(-1, mean, inplace=True)
@@ -220,6 +224,7 @@ def read_input(train_file_path, test_file_path, is_train=True, drop_pct=0.95):
 
         test_real_value = raw_test_data[real_value_cols].applymap(lambda x: 0.1 * x)
         test_discrete = raw_test_data[discrete_cols + create_cols].applymap(lambda x: featmap.get(x, 0))
+        test_instance_id = raw_test_data['instance_id']
         return featmap, train_real_value.values, train_discrete.values, train_labels.values, \
                test_real_value.values, test_discrete.values, test_instance_id.values
 
