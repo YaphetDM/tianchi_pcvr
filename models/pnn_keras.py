@@ -1,7 +1,9 @@
 # coding:utf-8
 import keras
 from keras import backend as K
-from keras.layers import Layer, Input, Dense, Concatenate, Embedding, LeakyReLU
+from keras.initializers import truncated_normal
+from keras.regularizers import l2
+from keras.layers import Layer, Input, Dense, Concatenate, Embedding, LeakyReLU, Dropout
 from keras.models import Model
 import tensorflow as tf
 from keras.backend.tensorflow_backend import set_session
@@ -18,8 +20,9 @@ set_session(tf.Session(config=config))
 
 
 class ZLayer(Layer):
-    def __init__(self, output_dim, **kwargs):
+    def __init__(self, output_dim, reg, **kwargs):
         self.output_dim = output_dim
+        self.reg = reg
         self.supports_masking = True
         super().__init__(**kwargs)
 
@@ -28,10 +31,11 @@ class ZLayer(Layer):
         self.embed_size = input_shape[2]
         self.weight = self.add_weight(shape=[self.field_dim * self.embed_size, self.output_dim],
                                       name='z_weight',
-                                      initializer=keras.initializers.truncated_normal(stddev=0.01))
+                                      initializer=truncated_normal(stddev=0.01),
+                                      regularizer=l2(self.reg))
         self.built = True
 
-    def call(self, inputs, mask=None):
+    def call(self, inputs, **kwargs):
         return K.dot(K.reshape(inputs, (-1, self.field_dim * self.embed_size)), self.weight)
 
     def compute_mask(self, inputs, mask=None):
@@ -57,8 +61,9 @@ class InnerProductLayer(Layer):
 
 
 class OuterProductLayer(Layer):
-    def __init__(self, output_dim, **kwargs):
+    def __init__(self, output_dim, reg, **kwargs):
         self.output_dim = output_dim
+        self.reg = reg
         self.supports_masking = True
         super().__init__(**kwargs)
 
@@ -67,7 +72,8 @@ class OuterProductLayer(Layer):
         self.embed_size = input_shape[2]
         self.weight = self.add_weight(shape=[self.embed_size * self.embed_size, self.output_dim],
                                       name='p_weight',
-                                      initializer=keras.initializers.truncated_normal(stddev=0.01))
+                                      initializer=truncated_normal(stddev=0.01),
+                                      regularizer=l2(self.reg))
         self.built = True
 
     def call(self, inputs, **kwargs):
@@ -84,7 +90,7 @@ class OuterProductLayer(Layer):
 
 class ProductNetwork(object):
     def __init__(self, field_dim, feature_dim, embedding_size, output_dim, fully_list,
-                 epoch, batch_size, lr, mode='outer'):
+                 epoch, batch_size, lr, reg, keep_prob, init_std, mode='outer'):
         self.field_dim = field_dim
         self.feature_dim = feature_dim
         self.output_dim = output_dim
@@ -93,6 +99,9 @@ class ProductNetwork(object):
         self.epoch = epoch
         self.batch_size = batch_size
         self.lr = lr
+        self.reg = reg
+        self.keep_prob = keep_prob
+        self.init_std = init_std
 
         self.fully_list = fully_list
         self.mode = mode
@@ -100,17 +109,24 @@ class ProductNetwork(object):
     def build_model(self):
         inputs = Input((self.field_dim,))
         embeddings = Embedding(self.feature_dim + 1, self.embedding_size, mask_zero=True)(inputs)
-        z = ZLayer(self.output_dim)(embeddings)
+        z = ZLayer(self.output_dim, self.reg)(embeddings)
         p = None
         if self.mode == 'outer':
-            p = OuterProductLayer(self.output_dim)(embeddings)
+            p = OuterProductLayer(self.output_dim, self.reg)(embeddings)
+        else:
+            pass
         features = Concatenate(axis=1)([z, p])
         outputs = LeakyReLU(1.0)(features)
         for i in range(len(self.fully_list)):
             if i < len(self.fully_list) - 1:
-                outputs = Dense(self.fully_list[i], activation='relu')(outputs)
+                outputs = Dropout(self.keep_prob)(Dense(self.fully_list[i],
+                                                        activation='relu',
+                                                        kernel_initializer=truncated_normal(stddev=self.init_std),
+                                                        kernel_regularizer=l2(self.reg))(outputs))
             else:
-                outputs = Dense(1, activation='sigmoid')(outputs)
+                outputs = Dense(1, activation='sigmoid',
+                                kernel_initializer=truncated_normal(stddev=self.init_std),
+                                kernel_regularizer=l2(self.reg))(outputs)
         return Model([inputs], outputs)
 
     def train(self, train_inputs, train_labels):
@@ -140,11 +156,11 @@ if __name__ == '__main__':
     test_file_path = 'data/test'
     output_file_path = 'output.txt'
     is_train = True
-    drop_pct = 0.95
+    drop_pct = 0.96
     featmap, train_real_value, train_discrete, train_labels, \
     valid_real_value, valid_discrete, valid_labels = read_input(train_file_path, test_file_path=None,
                                                                 is_train=is_train, drop_pct=drop_pct)
     features_len = len(featmap)
     print('features length: ', features_len)
-    opnn = ProductNetwork(20, features_len + 1, 5, 10, [3, 1], 2, 64, 1e-3)
+    opnn = ProductNetwork(20, features_len + 1, 6, 50, [128, 128, 1], 20, 256, 1e-3, 1e-4, 0.5, 0.01)
     opnn.train_with_valid(train_discrete, train_labels, valid_discrete, valid_labels)
