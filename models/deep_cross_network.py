@@ -1,113 +1,205 @@
 # coding:utf-8
+
+import os
+
+import keras
 import tensorflow as tf
-from tensorflow.contrib.layers import fully_connected, l2_regularizer
+import xgboost as xgb
+from keras import backend as K
+from keras.backend.tensorflow_backend import set_session
+from keras.callbacks import EarlyStopping
+from keras.layers import Input, Embedding, Concatenate, Add, Lambda, Flatten, Dense
+from keras.layers import Layer
+from keras.models import Model
+from sklearn.metrics import log_loss
+
+from utils import read_input, _Reshape
+
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
+config = tf.ConfigProto()
+config.gpu_options.per_process_gpu_memory_fraction = 0.3
+set_session(tf.Session(config=config))
 
 
-def tf_weighted_sigmoid_ce_with_logits(labels=None, logits=None, sample_weight=None):
-    return tf.multiply(tf.nn.sigmoid_cross_entropy_with_logits(
-        labels=labels, logits=logits), sample_weight)
+class CrossLayer(Layer):
+    def __init__(self, output_dim, num_layer, cross_reg, **kwargs):
+        self.output_dim = output_dim
+        self.num_layer = num_layer
+        self.cross_reg = cross_reg
+        self.supports_masking = True
+        super(CrossLayer, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        self.input_dim = input_shape[1]
+        self.W = []
+        self.bias = []
+        for i in range(self.num_layer):
+            self.W.append(
+                self.add_weight(shape=[1, self.input_dim],
+                                initializer=keras.initializers.truncated_normal(stddev=0.01), name='w_' + str(i),
+                                regularizer=keras.regularizers.l2(self.cross_reg),
+                                trainable=True))
+            self.bias.append(
+                self.add_weight(shape=[1, self.input_dim], initializer='zeros', name='b_' + str(i), trainable=True))
+        self.built = True
+
+    def call(self, inputs, **kwargs):
+        cross = None
+        for i in range(self.num_layer):
+            if i == 0:
+                cross = Lambda(lambda x: Add()(
+                    [K.sum(self.W[i] * K.batch_dot(K.reshape(x, (-1, self.input_dim, 1)),
+                                                   K.reshape(x, (-1, 1, self.input_dim))), 1, keepdims=True),
+                     self.bias[i], x]))(inputs)
+            else:
+                cross = Lambda(lambda x: Add()(
+                    [K.sum(self.W[i] * K.batch_dot(K.reshape(x, (-1, self.input_dim, 1)),
+                                                   K.reshape(inputs, (-1, 1, self.input_dim))), 1, keepdims=True),
+                     self.bias[i], cross]))(cross)
+        return Flatten()(cross)
+
+    def compute_mask(self, inputs, mask=None):
+        return mask
+
+    def compute_output_shape(self, input_shape):
+        return input_shape[0], self.output_dim
 
 
 class DeepCrossNetwork(object):
-    def __init__(self, filed_dim, feature_dim, embedding_size=64, cross_layer_num=1,
-                 hidden_size=None, use_batch_norm=True, deep_l2_reg=0.0, sample_weight=0.5,
-                 init_std=0.01, seed=1024, keep_prob=0.5):
-        if hidden_size is None:
-            hidden_size = []
-        self.filed_dim = filed_dim
+    def __init__(self, field_dim, feature_dim, embedding_size, batch_size, cross_layer_num,
+                 hidden_size, init_std, seed, embed_reg, cross_reg, dense_reg, output_reg,
+                 lr, epoch, keep_prob):
+        self.field_dim = field_dim
         self.feature_dim = feature_dim
         self.embedding_size = embedding_size
-        self.deep_l2_reg = deep_l2_reg
-        self.sample_weight = sample_weight
-        self.init_std = init_std
-        self.keep_prob = keep_prob
+        self.batch_size = batch_size
         self.seed = seed
+
         self.cross_layer_num = cross_layer_num
         self.hidden_size = hidden_size
-        self.use_batch_norm = use_batch_norm
 
-    def f_cross_l(self, x_l, w_l, b_l):
-        _dot = tf.matmul(self.x_0, x_l, transpose_b=True)
-        return tf.nn.xw_plus_b(_dot, w_l, b_l)
+        self.init_std = init_std
+        self.embed_reg = embed_reg
+        self.cross_reg = cross_reg
+        self.dense_reg = dense_reg
+        self.output_reg = output_reg
+        self.keep_prob = keep_prob
+        self.input_dim = self.field_dim[0] + self.field_dim[1] * self.embedding_size
 
-    def _create_placeholder(self, ):
-        with tf.name_scope('placeholder'):
-            self.X = tf.placeholder(
-                dtype=tf.int32, shape=[None, self.filed_dim], name='input_X')
-            self.y = tf.placeholder(tf.float32, shape=[None, ], name='input_y')
-            self.train_flag = tf.placeholder(tf.bool, name='train_flag')
+        self.lr = lr
+        self.epoch = epoch
 
-    def _create_variable(self, ):
+        self.real_value_input = Input(shape=(self.field_dim[0],))
+        self.discrete_input = Input(shape=(self.field_dim[1],))
 
-        self.total_size = self.filed_dim * self.embedding_size
-        with tf.name_scope('embedding'):
-            self.embedding = tf.Variable(tf.truncated_normal(
-                [self.feature_dim, self.embedding_size], stddev=self.init_std, seed=self.seed),
-                name='cross_embed_weight')
+    def dense_loop(self, input):
+        output = input
+        if len(self.hidden_size) == 0:
+            pass
+        else:
+            for each in self.hidden_size:
+                output = Dense(each, activation=keras.activations.relu,
+                               kernel_initializer=keras.initializers.truncated_normal(stddev=self.init_std),
+                               kernel_regularizer=keras.regularizers.l2(self.dense_reg))(output)
+        return output
 
-        with tf.name_scope('cross_layer_weight'):
-            self.cross_layer_weight = [
-                tf.Variable(tf.truncated_normal(
-                    [self.total_size, 1], stddev=self.init_std, seed=self.seed),
-                    name='cross_layer_weight_' + str(i)) for i in range(self.cross_layer_num)]
+    def build_model(self):
+        embeddings = Embedding(self.feature_dim + 1, self.embedding_size,
+                               embeddings_initializer=keras.initializers.truncated_normal(stddev=self.init_std),
+                               embeddings_regularizer=keras.regularizers.l2(self.embed_reg),
+                               mask_zero=True)(self.discrete_input)
+        reshape = _Reshape(target_shape=(-1,))(embeddings)
+        # features = Concatenate(axis=1)([real_value_input, reshape])
+        features = Concatenate(axis=1)([self.real_value_input, reshape])
+        dense_network_out = features
+        for each in self.hidden_size:
+            dense_network_out = Dense(each, activation=keras.activations.relu,
+                                      kernel_initializer=keras.initializers.truncated_normal(stddev=self.init_std),
+                                      kernel_regularizer=keras.regularizers.l2(self.dense_reg))(dense_network_out)
 
-        with tf.name_scope('cross_layer_bias'):
-            self.cross_layer_bias = [
-                tf.Variable(tf.constant(0.0, tf.float32, [self.total_size, 1]),
-                            name='cross_layer_bias_' + str(i)) for i in range(self.cross_layer_num)]
+        cross_network_out = CrossLayer(self.input_dim, self.cross_layer_num, self.cross_reg)(features)
+        # self.hidden_size[-1]+ self.field_dim[0] + self.field_dim[1] * self.embedding_size
+        concat = Concatenate(axis=1, name='concat')([dense_network_out, cross_network_out])
 
-    def _forward_pass(self, ):
-        fc_input = None
+        output = Dense(1, activation='sigmoid',
+                       kernel_initializer=keras.initializers.truncated_normal(stddev=self.init_std),
+                       kernel_regularizer=keras.regularizers.l2(self.output_reg))(concat)
+        return Model([self.real_value_input, self.discrete_input], [output]), Model(
+            [self.real_value_input, self.discrete_input], [concat])
 
-        def inverted_dropout(fc, keep_prob):
-            return tf.divide(tf.nn.dropout(fc, keep_prob), keep_prob)
+    def train(self, train_inputs, train_labels):
+        print('dcn training step...')
+        early_stopping = EarlyStopping(monitor='loss', patience=1, min_delta=0.001)
+        self.model = self.build_model()[0]
+        self.model.compile(optimizer=keras.optimizers.Adam(self.lr),
+                           loss=keras.losses.binary_crossentropy,
+                           metrics=[keras.metrics.binary_crossentropy])
+        self.model.fit(train_inputs, train_labels, batch_size=self.batch_size,
+                       callbacks=[early_stopping], epochs=self.epoch)
 
-        with tf.name_scope('cross_network'):
-            with tf.name_scope('embeddings'):
-                embeddings = tf.nn.embedding_lookup(
-                    self.embedding, self.X, partition_strategy='div')
-            self.x_0 = tf.reshape(embeddings, (-1, self.total_size, 1))
-            x_l = self.x_0
-            for l in range(self.cross_layer_num):
-                x_l = self.f_cross_l(x_l, self.cross_layer_weight[l], self.cross_layer_bias[l]) + x_l
-            cross_network_out = tf.reshape(x_l, (-1, self.total_size))
+    def train_with_valid(self, train_inputs, train_labels, valid_inputs, valid_labels):
+        print('dcn training step...')
+        early_stopping = EarlyStopping(monitor='val_binary_crossentropy', patience=1, min_delta=0.001, mode='min')
+        self.model = self.build_model()[0]
+        self.model.compile(optimizer=keras.optimizers.Adam(self.lr),
+                           loss=keras.losses.binary_crossentropy,
+                           metrics=[keras.metrics.binary_crossentropy])
+        self.model.fit(train_inputs, train_labels, validation_data=(valid_inputs, valid_labels),
+                       batch_size=self.batch_size, callbacks=[early_stopping], epochs=self.epoch)
 
-        with tf.name_scope('deep_network'):
-            if len(self.hidden_size) > 0:
-                fc_input = tf.reshape(embeddings, (-1, self.total_size))
-                for l in range(len(self.hidden_size)):
-                    if self.use_batch_norm:
-                        weight = tf.get_variable(
-                            name='deep_weight_' + str(l), shape=[fc_input.get_shape().aslist()[1], self.hidden_size[l]])
-                        bias = tf.get_variable(
-                            name='deep_bias_' + str(l), shape=[fc_input.get_shape().aslist()[1], 1],
-                            initializer=tf.zeros_initializer)
-                        h_l = tf.nn.xw_plus_b(fc_input, weight, bias)
-                        # h_l_bn = tf.nn.batch_normalization(h_l,)
-                        h_l_bn = tf.layers.batch_normalization(h_l, training=self.train_flag)
-                        fc = tf.nn.relu(h_l_bn)
-                    else:
-                        fc = fully_connected(fc_input, self.hidden_size[l],
-                                             activation_fn=tf.nn.relu,
-                                             weights_initializer=tf.truncated_normal_initializer(
-                                                 stddev=self.init_std),
-                                             weights_regularizer=l2_regularizer(self.deep_l2_reg))
-                if l < len(self.hidden_size) - 1:
-                    fc = tf.cond(self.train_flag, lambda: inverted_dropout(
-                        fc, self.keep_prob), lambda: fc)
-                fc_input = fc
-            deep_network_out = fc_input
+    def dcn_predict(self, inputs):
+        predictions = self.model.predict(inputs)
+        return predictions.reshape((-1,))
 
-        with tf.name_scope('combination_output_layer'):
-            x_stack = cross_network_out
-            if len(self.hidden_size) > 0:
-                x_stack = tf.concat([x_stack, deep_network_out], axis=1)
-            self.logit = fully_connected(x_stack, 1, activation_fn=None,
-                                         weights_initializer=tf.truncated_normal_initializer(stddev=self.init_std),
-                                         weights_regularizer=None)
-            self.logit = tf.reshape(self.logit, (-1,))
+    def get_concat(self, inputs):
+        concat_model = self.build_model()[1]
+        return concat_model.predict(inputs, batch_size=self.batch_size * 2)
 
-    def _create_loss(self, ):
-        self.log_loss = tf.reduce_sum(tf_weighted_sigmoid_ce_with_logits(labels=self.y, logits=self.logit,
-                                                                         sample_weight=self.sample_weight))
-        self.loss = self.log_loss
+    def xgb_train_with_concat(self, features, labels, num_boost_round=100, params=None):
+        print('xgb training...')
+        dtrain = xgb.DMatrix(self.get_concat(features), labels)
+        print('num rows', dtrain.num_row())
+        print('num columns', dtrain.num_col())
+        self.xgb_model = xgb.train(dtrain=dtrain, num_boost_round=num_boost_round, params=params)
+
+    def xgb_predict(self, features):
+        dtest = xgb.DMatrix(self.get_concat(features))
+        return self.xgb_model.predict(dtest, ntree_limit=self.xgb_model.best_ntree_limit)
+
+    def xgb_logloss(self, features, labels):
+        predictions = self.xgb_predict(features)
+        return log_loss(labels, predictions)
+
+
+if __name__ == '__main__':
+    train_file_path = 'data/train'
+    test_file_path = 'data/test'
+    output_file_path = 'output.txt'
+    is_train = True
+    drop_pct = 0.95
+    num_iterations = 1000
+    if is_train:
+        featmap, train_real_value, train_discrete, train_labels, \
+        valid_real_value, valid_discrete, valid_labels = read_input(train_file_path, test_file_path=None,
+                                                                    is_train=is_train, drop_pct=drop_pct)
+        features_len = len(featmap)
+        print('features length: ', features_len)
+        dcn = DeepCrossNetwork([4, 20], features_len, 16, 1024, 6, [128, 128, 128], 0.01, 1024,
+                               1e-2, 1e-2, 1e-2, 1e-2, 1e-3, 20, 0.4)
+        dcn.train_with_valid([train_real_value, train_discrete], train_labels,
+                             [valid_real_value, valid_discrete], valid_labels)
+    else:
+        featmap, train_real_value, train_discrete, train_labels, \
+        test_real_value, test_discrete, test_instance_id = read_input(train_file_path, test_file_path=test_file_path,
+                                                                      is_train=False, drop_pct=drop_pct)
+        features_len = len(featmap)
+        print('features length: ', features_len)
+        dcn = DeepCrossNetwork([4, 20], features_len, 8, 256, 4, [32, 32], 0.1, 1024,
+                               1e-2, 1e-2, 1e-2, 1e-2, 5e-4, 2, 0.4)
+        dcn.train([train_real_value, train_discrete], train_labels)
+        predictions = dcn.dcn_predict([test_real_value, test_discrete])
+        with open(output_file_path, 'w') as f:
+            f.write('instance_id predicted_score\n')
+            for i in range(len(test_instance_id)):
+                f.write(str(test_instance_id[i]) + ' ' + str(predictions[i]) + '\n')

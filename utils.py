@@ -2,7 +2,8 @@
 
 import time
 from datetime import datetime
-
+from keras.layers import Layer
+from keras import backend as K
 import numpy as np
 import pandas as pd
 
@@ -228,6 +229,57 @@ def read_input(train_file_path, test_file_path, is_train=True, drop_pct=0.95):
         return featmap, train_real_value.values, train_discrete.values, train_labels.values, \
                test_real_value.values, test_discrete.values, test_instance_id.values
 
+
+class _Reshape(Layer):
+    def __init__(self, target_shape, **kwargs):
+        super(_Reshape, self).__init__(**kwargs)
+        self.target_shape = tuple(target_shape)
+
+    def _fix_unknown_dimension(self, input_shape, output_shape):
+        output_shape = list(output_shape)
+        msg = 'total size of new array must be unchanged'
+
+        known, unknown = 1, None
+        for index, dim in enumerate(output_shape):
+            if dim < 0:
+                if unknown is None:
+                    unknown = index
+                else:
+                    raise ValueError('Can only specify one unknown dimension.')
+            else:
+                known *= dim
+
+        original = np.prod(input_shape, dtype=int)
+        if unknown is not None:
+            if known == 0 or original % known != 0:
+                raise ValueError(msg)
+            output_shape[unknown] = original // known
+        elif original != known:
+            raise ValueError(msg)
+
+        return tuple(output_shape)
+
+    def compute_output_shape(self, input_shape):
+        return (input_shape[0],) + self._fix_unknown_dimension(
+            input_shape[1:], self.target_shape)
+
+    def call(self, inputs, **kwargs):
+        # In case the target shape is not fully defined,
+        # we need access to the shape of `inputs`.
+        # solution: rely on `K.int_shape`.
+        target_shape = self.target_shape
+        if -1 in target_shape:
+            input_shape = None
+            try:
+                input_shape = K.int_shape(inputs)
+            except TypeError:
+                pass
+            if input_shape is not None:
+                target_shape = self.compute_output_shape(input_shape)[1:]
+        return K.reshape(inputs, (-1,) + target_shape)
+
+    def compute_mask(self, inputs, mask=None):
+        return mask
 
 if __name__ == '__main__':
     train_file_path = 'data/train.txt'
