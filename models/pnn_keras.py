@@ -1,14 +1,17 @@
 # coding:utf-8
+import os
+from sklearn.metrics import log_loss
+import numpy as np
+
 import keras
+import tensorflow as tf
 from keras import backend as K
+from keras.backend.tensorflow_backend import set_session
 from keras.initializers import truncated_normal
-from keras.regularizers import l2
 from keras.layers import Layer, Input, Dense, Concatenate, Embedding, LeakyReLU, Dropout
 from keras.models import Model
-import tensorflow as tf
-from keras.backend.tensorflow_backend import set_session
+from keras.regularizers import l2
 
-import os
 
 from utils import read_input
 
@@ -108,7 +111,10 @@ class ProductNetwork(object):
 
     def build_model(self):
         inputs = Input((self.field_dim,))
-        embeddings = Embedding(self.feature_dim + 1, self.embedding_size, mask_zero=True)(inputs)
+        embeddings = Embedding(self.feature_dim + 1, self.embedding_size,
+                               embeddings_initializer=truncated_normal(self.init_std),
+                               embeddings_regularizer=l2(self.reg),
+                               mask_zero=True, trainable=True)(inputs)
         z = ZLayer(self.output_dim, self.reg)(embeddings)
         p = None
         if self.mode == 'outer':
@@ -147,8 +153,10 @@ class ProductNetwork(object):
                        batch_size=self.batch_size, epochs=self.epoch)
 
     def pnn_predict(self, inputs):
-        predictions = self.model.predict(inputs)
-        return predictions.reshape((-1,))
+        predictions = self.model.predict(inputs).reshape((-1,))
+        print('max predictions: ', np.max(predictions))
+        print('min predictions: ', np.min(predictions))
+        return predictions
 
 
 if __name__ == '__main__':
@@ -162,5 +170,8 @@ if __name__ == '__main__':
                                                                 is_train=is_train, drop_pct=drop_pct)
     features_len = len(featmap)
     print('features length: ', features_len)
-    opnn = ProductNetwork(20, features_len + 1, 6, 50, [128, 128, 1], 20, 256, 1e-3, 1e-4, 0.5, 0.01)
-    opnn.train_with_valid(train_discrete, train_labels, valid_discrete, valid_labels)
+    opnn = ProductNetwork(20, features_len, 6, 50, [128, 128, 1], 20, 256, 1e-3, 1e-4, 0.5, 0.01)
+    opnn.train_with_valid(train_discrete, train_labels, train_discrete, train_labels)
+    valid_pred = opnn.pnn_predict(valid_discrete)
+    print('valid log loss: ', log_loss(valid_labels, valid_pred))
+    # opnn.train_with_valid(train_discrete, train_labels, train_discrete, train_labels)

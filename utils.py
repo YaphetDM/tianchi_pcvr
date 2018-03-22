@@ -148,13 +148,11 @@ def read_input(train_file_path, test_file_path, is_train=True, drop_pct=0.95):
     # 获取predict_category与category_list的交集, 将category_list长度扩展到3, 不够用0补齐
     extract_category_property(raw_train_data)
     # raw_train_data = extract_user_query(raw_train_data)
-
+    raw_train_data['time'] = raw_train_data['context_timestamp'].apply(get_day_hour)
+    raw_train_data['day'] = raw_train_data.time.apply(lambda x: x[0])
+    raw_train_data['week'] = raw_train_data.time.apply(lambda x: 'week_' + str(x[1]))
+    raw_train_data['hour'] = raw_train_data.time.apply(lambda x: 'hour_' + str(x[2]))
     if is_train:
-        raw_train_data['time'] = raw_train_data['context_timestamp'].apply(get_day_hour)
-
-        raw_train_data['day'] = raw_train_data.time.apply(lambda x: x[0])
-        raw_train_data['week'] = raw_train_data.time.apply(lambda x: x[1])
-        raw_train_data['hour'] = raw_train_data.time.apply(lambda x: x[2])
         train = raw_train_data.loc[raw_train_data.day < 24]
         validate = raw_train_data.loc[raw_train_data.day == 24]
         # 对于实数特征缺失值补均值
@@ -216,7 +214,7 @@ def read_input(train_file_path, test_file_path, is_train=True, drop_pct=0.95):
 
         features = [v for v in features if '_-1' not in v]
         # 生成featmap
-        featmap = dict(zip(np.unique(features), range(1, len(features) + 1)))
+        featmap = dict(zip(np.unique(features), range(1, len(np.unique(features)) + 1)))
 
         train_real_value = raw_train_data[real_value_cols].applymap(lambda x: 0.1 * x)
         # 训练数据feature to index mapping
@@ -280,6 +278,7 @@ class _Reshape(Layer):
 
     def compute_mask(self, inputs, mask=None):
         return mask
+
 
 if __name__ == '__main__':
     train_file_path = 'data/train.txt'
