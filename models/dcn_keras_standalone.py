@@ -1,17 +1,19 @@
 # coding:utf-8
 
-import keras
-from keras import backend as K
-from keras.layers import Input, Reshape, Embedding, Concatenate, Add, Lambda, Flatten, Dense, Dropout
-from keras.layers import Layer
-from keras.models import Model
-import numpy as np
-from xgboost_utils import read_input
 import os
-from keras.backend.tensorflow_backend import set_session
+
+import keras
+import numpy as np
 import tensorflow as tf
 import xgboost as xgb
+from keras import backend as K
+from keras.backend.tensorflow_backend import set_session
+from keras.layers import Input, Reshape, Embedding, Concatenate, Add, Lambda, Flatten, Dense
+from keras.layers import Layer
+from keras.models import Model
 from sklearn.metrics import auc
+
+from xgboost_utils import read_input
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"  # see issue #152
 os.environ["CUDA_VISIBLE_DEVICES"] = '0'
@@ -119,11 +121,11 @@ class DeepCrossNetwork(object):
         return TP / P
 
     def auc(self, y_true, y_pred):
-        ptas = tf.stack([self.binary_PTA(y_true, y_pred, k) for k in np.linspace(0, 1, 1000)], axis=0)
-        pfas = tf.stack([self.binary_PFA(y_true, y_pred, k) for k in np.linspace(0, 1, 1000)], axis=0)
-        pfas = tf.concat([tf.ones((1,)), pfas], axis=0)
-        binSizes = -(pfas[1:] - pfas[:-1])
-        s = ptas * binSizes
+        p_tas = tf.stack([self.binary_PTA(y_true, y_pred, k) for k in np.linspace(0, 1, 1000)], axis=0)
+        p_fas = tf.stack([self.binary_PFA(y_true, y_pred, k) for k in np.linspace(0, 1, 1000)], axis=0)
+        p_fas = tf.concat([tf.ones((1,)), p_fas], axis=0)
+        binSizes = -(p_fas[1:] - p_fas[:-1])
+        s = p_tas * binSizes
         return K.sum(s, axis=0)
 
     def xgb_auc(self, inputs, labels):
