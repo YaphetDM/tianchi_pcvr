@@ -285,5 +285,6 @@ if __name__ == '__main__':
     test_file_path = 'data/train.txt'
     featmap, train_real_value, train_discrete, train_labels, \
     test_real_value, test_discrete, test_instance_id = read_input(train_file_path, test_file_path)
-    for each in train_discrete.columns.tolist():
+    for each in featmap:
         print(each, featmap[each])
+        print('test')
