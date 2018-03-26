@@ -10,7 +10,6 @@ from keras.initializers import truncated_normal
 from keras.layers import Layer, Input, Dense, Concatenate, Embedding, LeakyReLU, Dropout, Conv1D, Flatten
 from keras.models import Model
 from keras.regularizers import l2
-from sklearn.metrics import log_loss
 
 from utils import read_input
 
@@ -159,13 +158,25 @@ if __name__ == '__main__':
     test_file_path = 'data/test'
     output_file_path = 'output.txt'
     is_train = True
-    drop_pct = 0.96
-    featmap, train_real_value, train_discrete, train_labels, \
-    valid_real_value, valid_discrete, valid_labels = read_input(train_file_path, test_file_path=None,
-                                                                is_train=is_train, drop_pct=drop_pct)
-    features_len = len(featmap)
-    print('features length: ', features_len)
-    opnn = ProductNetwork(20, features_len, 6, 50, [128, 128, 1], 20, 256, 1e-3, 1e-4, 0.5, 0.01)
-    opnn.train_with_valid(train_discrete, train_labels, train_discrete, train_labels)
-    valid_pred = opnn.pnn_predict(train_discrete)
-    print('valid log loss: ', log_loss(train_labels, valid_pred))
+    drop_pct = 0.98
+    if is_train:
+        featmap, train_real_value, train_discrete, train_labels, \
+        valid_real_value, valid_discrete, valid_labels = read_input(train_file_path, test_file_path=None,
+                                                                    is_train=is_train, drop_pct=drop_pct)
+        features_len = len(featmap)
+        print('features length: ', features_len)
+        opnn = ProductNetwork(20, features_len, 16, 150, [128, 128, 128, 128, 1], 50, 1024, 1e-5, 8e-4, 0.5, 0.01)
+        opnn.train_with_valid(train_discrete, train_labels, train_discrete, train_labels)
+    else:
+        featmap, train_real_value, train_discrete, train_labels, \
+        test_real_value, test_discrete, test_instance_id = read_input(train_file_path, test_file_path=test_file_path,
+                                                                      is_train=False, drop_pct=drop_pct)
+        features_len = len(featmap)
+        print('features length: ', features_len)
+        opnn = ProductNetwork(20, features_len, 16, 150, [128, 128, 128, 128, 1], 50, 1024, 1e-5, 8e-4, 0.5, 0.01)
+        opnn.train(train_discrete, train_labels)
+        predictions = opnn.pnn_predict(test_discrete)
+        with open(output_file_path, 'w') as f:
+            f.write('instance_id predicted_score\n')
+            for id, score in zip(test_instance_id, predictions):
+                f.write(str(id) + ' ' + str(score) + '\n')
