@@ -1,17 +1,16 @@
 # coding:utf-8
 import os
-from sklearn.metrics import log_loss
-import numpy as np
 
 import keras
+import numpy as np
 import tensorflow as tf
 from keras import backend as K
 from keras.backend.tensorflow_backend import set_session
 from keras.initializers import truncated_normal
-from keras.layers import Layer, Input, Dense, Concatenate, Embedding, LeakyReLU, Dropout
+from keras.layers import Layer, Input, Dense, Concatenate, Embedding, LeakyReLU, Dropout, Conv1D, Conv2D, Flatten
 from keras.models import Model
 from keras.regularizers import l2
-
+from sklearn.metrics import log_loss
 
 from utils import read_input
 
@@ -30,16 +29,17 @@ class ZLayer(Layer):
         super().__init__(**kwargs)
 
     def build(self, input_shape):
+        self.batch_size = input_shape[0]
         self.field_dim = input_shape[1]
         self.embed_size = input_shape[2]
-        self.weight = self.add_weight(shape=[self.field_dim * self.embed_size, self.output_dim],
-                                      name='z_weight',
-                                      initializer=truncated_normal(stddev=0.01),
-                                      regularizer=l2(self.reg))
+        # self.weight = self.add_weight(shape=(self.batch_size,self.field_dim),
+        #                               name='z_weight',
+        #                               initializer=truncated_normal(stddev=0.01),
+        #                               regularizer=l2(self.reg))
         self.built = True
 
     def call(self, inputs, **kwargs):
-        return K.dot(K.reshape(inputs, (-1, self.field_dim * self.embed_size)), self.weight)
+        return Flatten()(Conv1D(self.output_dim, (self.field_dim,))(inputs))
 
     def compute_mask(self, inputs, mask=None):
         return mask
@@ -114,7 +114,7 @@ class ProductNetwork(object):
         embeddings = Embedding(self.feature_dim + 1, self.embedding_size,
                                embeddings_initializer=truncated_normal(self.init_std),
                                embeddings_regularizer=l2(self.reg),
-                               mask_zero=True, trainable=True)(inputs)
+                               mask_zero=False, trainable=True)(inputs)
         z = ZLayer(self.output_dim, self.reg)(embeddings)
         p = None
         if self.mode == 'outer':
@@ -153,7 +153,7 @@ class ProductNetwork(object):
                        batch_size=self.batch_size, epochs=self.epoch)
 
     def pnn_predict(self, inputs):
-        predictions = self.model.predict(inputs).reshape((-1,))
+        predictions = self.model.predict(inputs).reshape((-1))
         print('max predictions: ', np.max(predictions))
         print('min predictions: ', np.min(predictions))
         return predictions
@@ -172,6 +172,5 @@ if __name__ == '__main__':
     print('features length: ', features_len)
     opnn = ProductNetwork(20, features_len, 6, 50, [128, 128, 1], 20, 256, 1e-3, 1e-4, 0.5, 0.01)
     opnn.train_with_valid(train_discrete, train_labels, train_discrete, train_labels)
-    valid_pred = opnn.pnn_predict(valid_discrete)
-    print('valid log loss: ', log_loss(valid_labels, valid_pred))
-    # opnn.train_with_valid(train_discrete, train_labels, train_discrete, train_labels)
+    valid_pred = opnn.pnn_predict(train_discrete)
+    print('valid log loss: ', log_loss(train_labels, valid_pred))
