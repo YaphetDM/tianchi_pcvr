@@ -7,7 +7,7 @@ import tensorflow as tf
 from keras import backend as K
 from keras.backend.tensorflow_backend import set_session
 from keras.initializers import truncated_normal
-from keras.layers import Layer, Input, Dense, Concatenate, Embedding, LeakyReLU, Dropout, Conv1D, Conv2D, Flatten
+from keras.layers import Layer, Input, Dense, Concatenate, Embedding, LeakyReLU, Dropout, Conv1D, Flatten
 from keras.models import Model
 from keras.regularizers import l2
 from sklearn.metrics import log_loss
@@ -29,7 +29,6 @@ class ZLayer(Layer):
         super().__init__(**kwargs)
 
     def build(self, input_shape):
-        self.batch_size = input_shape[0]
         self.field_dim = input_shape[1]
         self.embed_size = input_shape[2]
         # self.weight = self.add_weight(shape=(self.batch_size,self.field_dim),
@@ -73,16 +72,18 @@ class OuterProductLayer(Layer):
     def build(self, input_shape):
         self.field_dim = input_shape[1]
         self.embed_size = input_shape[2]
-        self.weight = self.add_weight(shape=[self.embed_size * self.embed_size, self.output_dim],
-                                      name='p_weight',
-                                      initializer=truncated_normal(stddev=0.01),
-                                      regularizer=l2(self.reg))
+        # self.weight = self.add_weight(shape=[self.embed_size * self.embed_size, self.output_dim],
+        #                               name='p_weight',
+        #                               initializer=truncated_normal(stddev=0.01),
+        #                               regularizer=l2(self.reg))
         self.built = True
 
     def call(self, inputs, **kwargs):
         f_sigma = K.sum(inputs, axis=1)
         p = K.map_fn(lambda x: K.dot(K.reshape(x, (-1, 1)), K.reshape(x, (1, -1))), elems=f_sigma)
-        return K.dot(K.reshape(p, (-1, self.embed_size * self.embed_size)), self.weight)
+        return Flatten()(Conv1D(self.output_dim, (self.embed_size,))(p))
+        # p = K.map_fn(lambda x: K.dot(K.reshape(x, (-1, 1)), K.reshape(x, (1, -1))), elems=f_sigma)
+        # return K.dot(K.reshape(p, (-1, self.embed_size * self.embed_size)), self.weight)
 
     def compute_mask(self, inputs, mask=None):
         return mask
