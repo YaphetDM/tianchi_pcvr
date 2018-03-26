@@ -204,7 +204,7 @@ if __name__ == '__main__':
               'silent': 1}
     file_path = '../data/train.txt'
     featmap, train_real_value, train_discrete, train_labels, test_real_value, test_discrete, test_labels = read_input(
-        file_path)
+        file_path, file_path)
     features_len = len(featmap)
     print('feature length ', features_len)
     # dcn = DeepCrossNetwork([4, 20], features_len, 32, 256, 6, [32, 32, 64, 64], 0.1, 1024, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3,

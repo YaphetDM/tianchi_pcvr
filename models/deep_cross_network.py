@@ -1,9 +1,9 @@
 # coding:utf-8
 
 import os
-import numpy as np
 
 import keras
+import numpy as np
 import tensorflow as tf
 from keras import backend as K
 from keras.backend.tensorflow_backend import set_session
@@ -13,7 +13,6 @@ from keras.layers import Layer
 from keras.models import Model
 from keras.regularizers import l2
 from sklearn.metrics import log_loss
-# from keras.
 
 from utils import read_input, _Reshape
 
