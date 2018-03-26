@@ -6,6 +6,7 @@ from keras.layers import Layer
 from keras import backend as K
 import numpy as np
 import pandas as pd
+import tensorflow as tf
 
 
 class DataSet(object):
@@ -39,6 +40,33 @@ class DataSet(object):
             assert batch_size <= self._num_examples
         end = self._index_in_epoch
         return self._features[start:end].tolist(), self._labels[start:end].tolist()
+
+
+def binary_PFA(y_true, y_pred, threshold=K.variable(value=0.5)):
+    y_pred = K.cast(y_pred >= threshold, 'float32')
+    # N = total number of negative labels
+    N = K.sum(1 - y_true)
+    # FP = total number of false alerts, alerts from the negative class labels
+    FP = K.sum(y_pred - y_pred * y_true)
+    return FP / N
+
+
+def binary_PTA(y_true, y_pred, threshold=K.variable(value=0.5)):
+    y_pred = K.cast(y_pred >= threshold, 'float32')
+    # P = total number of positive labels
+    P = K.sum(y_true)
+    # TP = total number of correct alerts, alerts from the positive class labels
+    TP = K.sum(y_pred * y_true)
+    return TP / P
+
+
+def auc(y_true, y_pred):
+    p_tas = tf.stack([binary_PTA(y_true, y_pred, k) for k in np.linspace(0, 1, 1000)], axis=0)
+    p_fas = tf.stack([binary_PFA(y_true, y_pred, k) for k in np.linspace(0, 1, 1000)], axis=0)
+    p_fas = tf.concat([tf.ones((1,)), p_fas], axis=0)
+    binSizes = -(p_fas[1:] - p_fas[:-1])
+    s = p_tas * binSizes
+    return K.sum(s, axis=0)
 
 
 def get_day_hour(value, time_format='%Y-%m-%d-%H'):

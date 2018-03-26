@@ -11,9 +11,8 @@ from keras.backend.tensorflow_backend import set_session
 from keras.layers import Input, Reshape, Embedding, Concatenate, Add, Lambda, Flatten, Dense
 from keras.layers import Layer
 from keras.models import Model
-from sklearn.metrics import auc
 
-from xgboost_utils import read_input
+from utils import read_input, auc
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"  # see issue #152
 os.environ["CUDA_VISIBLE_DEVICES"] = '0'
@@ -104,30 +103,6 @@ class DeepCrossNetwork(object):
                 # output = Dropout(self.keep_prob)(output)
         return output
 
-    def binary_PFA(self, y_true, y_pred, threshold=K.variable(value=0.5)):
-        y_pred = K.cast(y_pred >= threshold, 'float32')
-        # N = total number of negative labels
-        N = K.sum(1 - y_true)
-        # FP = total number of false alerts, alerts from the negative class labels
-        FP = K.sum(y_pred - y_pred * y_true)
-        return FP / N
-
-    def binary_PTA(self, y_true, y_pred, threshold=K.variable(value=0.5)):
-        y_pred = K.cast(y_pred >= threshold, 'float32')
-        # P = total number of positive labels
-        P = K.sum(y_true)
-        # TP = total number of correct alerts, alerts from the positive class labels
-        TP = K.sum(y_pred * y_true)
-        return TP / P
-
-    def auc(self, y_true, y_pred):
-        p_tas = tf.stack([self.binary_PTA(y_true, y_pred, k) for k in np.linspace(0, 1, 1000)], axis=0)
-        p_fas = tf.stack([self.binary_PFA(y_true, y_pred, k) for k in np.linspace(0, 1, 1000)], axis=0)
-        p_fas = tf.concat([tf.ones((1,)), p_fas], axis=0)
-        binSizes = -(p_fas[1:] - p_fas[:-1])
-        s = p_tas * binSizes
-        return K.sum(s, axis=0)
-
     def xgb_auc(self, inputs, labels):
         inputs = xgb.DMatrix(inputs)
         prediction = self.xgb_model.predict(inputs)
@@ -156,7 +131,7 @@ class DeepCrossNetwork(object):
         self.model = self.build_model()
         self.model.compile(optimizer=keras.optimizers.Adam(self.lr),
                            loss=keras.losses.binary_crossentropy,
-                           metrics=[keras.metrics.binary_crossentropy, self.auc])
+                           metrics=[keras.metrics.binary_crossentropy, auc])
         self.model.fit(inputs, labels, batch_size=self.batch_size, epochs=self.epoch)
 
     def evaluate_dcn(self, inputs, labels):
