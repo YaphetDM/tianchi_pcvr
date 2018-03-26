@@ -3,7 +3,6 @@
 import os
 
 import keras
-import numpy as np
 import tensorflow as tf
 import xgboost as xgb
 from keras import backend as K
@@ -11,6 +10,7 @@ from keras.backend.tensorflow_backend import set_session
 from keras.layers import Input, Reshape, Embedding, Concatenate, Add, Lambda, Flatten, Dense
 from keras.layers import Layer
 from keras.models import Model
+from sklearn.metrics import log_loss, auc as sklearn_auc
 
 from utils import read_input, auc
 
@@ -106,7 +106,7 @@ class DeepCrossNetwork(object):
     def xgb_auc(self, inputs, labels):
         inputs = xgb.DMatrix(inputs)
         prediction = self.xgb_model.predict(inputs)
-        return auc(prediction, labels)
+        return sklearn_auc(prediction, labels)
 
     def build_model(self):
         embeddings = Embedding(self.feature_dim + 1, self.embedding_size,
@@ -138,17 +138,13 @@ class DeepCrossNetwork(object):
         print('dcn evaluate step...')
         _, cross_entropy = self.model.evaluate(inputs, labels, batch_size=self.batch_size * 2)
         print('dcn evaluation loss ', cross_entropy)
-        #
-        # prediction = self.model.predict(inputs, batch_size=self.batch_size)
-        # cross_entropy = self._cross_entropy(prediction, labels)
-        # print("dcn cross entropy: ", cross_entropy)
 
     def get_concat(self, inputs):
         concat_model = Model(self.model.inputs, [self.concat])
         return concat_model.predict(inputs, batch_size=self.batch_size * 2)
 
     def _cross_entropy(self, prediction, labels):
-        return -np.mean(np.log(prediction) * labels) - np.mean(np.log(1 - prediction) - np.log(1 - prediction) * labels)
+        return log_loss(labels, prediction)
 
     def xgb_train_with_concat(self, features, labels, params):
         print('xgb training...')
