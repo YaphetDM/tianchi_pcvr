@@ -38,7 +38,9 @@ class ZLayer(Layer):
         self.built = True
 
     def call(self, inputs, **kwargs):
-        return Flatten()(Conv1D(self.output_dim, (self.field_dim,))(inputs))
+        return Flatten()(Conv1D(self.output_dim, (self.field_dim,),
+                                kernel_initializer=truncated_normal(stddev=0.01),
+                                kernel_regularizer=l2(self.reg))(inputs))
 
     def compute_mask(self, inputs, mask=None):
         return mask
@@ -79,9 +81,14 @@ class OuterProductLayer(Layer):
         self.built = True
 
     def call(self, inputs, **kwargs):
-        f_sigma = K.sum(inputs, axis=1)
-        p = K.map_fn(lambda x: K.dot(K.reshape(x, (-1, 1)), K.reshape(x, (1, -1))), elems=f_sigma)
-        return Flatten()(Conv1D(self.output_dim, (self.embed_size,))(p))
+        f_sigma = K.sum(inputs, axis=1, keepdims=True)
+        p = K.batch_dot(tf.transpose(f_sigma, (0, 2, 1)), f_sigma)
+
+        # p = K.batch_dot(tf.transpose(inputs, (0, 2, 1)), inputs)
+        # p = K.map_fn(lambda x: K.dot(K.reshape(x, (-1, 1)), K.reshape(x, (1, -1))), elems=f_sigma)
+        return Flatten()(Conv1D(self.output_dim, (self.embed_size,),
+                                kernel_initializer=truncated_normal(0.01),
+                                kernel_regularizer=l2(self.reg))(p))
         # p = K.map_fn(lambda x: K.dot(K.reshape(x, (-1, 1)), K.reshape(x, (1, -1))), elems=f_sigma)
         # return K.dot(K.reshape(p, (-1, self.embed_size * self.embed_size)), self.weight)
 
